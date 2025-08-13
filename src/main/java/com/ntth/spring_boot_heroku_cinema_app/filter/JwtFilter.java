@@ -24,6 +24,7 @@ import org.springframework.util.StringUtils;
 // 3) Validate JWT
 // 4) Lấy email từ JWT → load UserDetails
 // 5) Gắn Authentication vào SecurityContext để downstream (controller) biết đã đăng nhập.
+//=>kiểm tra token mỗi lần gọi API
 @Component
 public class JwtFilter extends OncePerRequestFilter {
 

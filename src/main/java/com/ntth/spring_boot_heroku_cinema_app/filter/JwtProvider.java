@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Date;
 
+//=> tạo token
 @Component
 public class JwtProvider {//tạo & giải mã token
     @Value("${jwt.secret}")

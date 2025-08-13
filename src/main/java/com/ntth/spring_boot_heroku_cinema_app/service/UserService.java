@@ -6,6 +6,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
+import java.util.Map;
+
 @Service
 public class UserService {
 
@@ -20,7 +23,6 @@ public class UserService {
         if (userRepository.existsByEmail(user.getEmail())) {
             return "Email đã tồn tại!";
         }
-
         // Lưu user mới
         user.setPassword(passwordEncoder.encode(user.getPassword()));//Mã hóa mật khẩu trước khi lưu
         userRepository.save(user);
@@ -33,4 +35,30 @@ public class UserService {
                 .filter(u -> passwordEncoder.matches(password, u.getPassword()))//So sánh mật khẩu người dùng nhập với bản đã mã hóa trong DB
                 .orElseThrow(() -> new RuntimeException("Email hoặc mật khẩu sai"));
     }
+
+//    //xác thực người dùng dựa trên username và password
+//    public Map<String, Object> authenticateUser(String username, String password) {
+//        Map<String, Object> response = new HashMap<>();
+//        // Tìm user theo username
+//        User user = userRepository.findByEmail(username);
+//        if (user == null) {
+//            response.put("success", false);
+//            response.put("message", "Tên đăng nhập không tồn tại.");
+//            return response;
+//        }
+//        // Kiểm tra mật khẩu
+//        if (!passwordEncoder.matches(password, user.getPassword())) {
+//            response.put("success", false);
+//            response.put("message", "Mật khẩu không đúng.");
+//            return response;
+//        }
+//        // Tạo JWT token
+//        String token = jwtUtil.generateToken(user.getUsername(), user.getRole().toString());
+//
+//        response.put("success", true);
+//        response.put("message", "Đăng nhập thành công!");
+//        response.put("token", token);
+//        response.put("user", user);
+//        return response;
+//    }
 }
