@@ -4,6 +4,7 @@
  */
 package com.ntth.spring_boot_heroku_cinema_app.Config;
 
+import com.ntth.spring_boot_heroku_cinema_app.filter.JwtFilter;
 import jakarta.servlet.Filter;
 import jakarta.servlet.MultipartConfigElement;
 import jakarta.servlet.ServletRegistration;
@@ -45,9 +46,5 @@ public class DispatcherServletInit extends AbstractAnnotationConfigDispatcherSer
 
         registration.setMultipartConfig(new MultipartConfigElement(location, maxFileSize, maxRequestSize, fileSizeThreshold));
     }
-//    
-//    @Override////thêm JwtFilter, hiện tại đang bị comment.
-//    protected Filter[] getServletFilters() {
-//        return new Filter[] { new JwtFilter() }; // Filter sẽ áp dụng cho mọi request
-//    }
+
 }

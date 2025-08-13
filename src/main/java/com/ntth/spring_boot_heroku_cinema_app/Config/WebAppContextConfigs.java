@@ -39,7 +39,7 @@ public class WebAppContextConfigs implements WebMvcConfigurer {
 
     @Override
     public void configureDefaultServletHandling(DefaultServletHandlerConfigurer configurer) {
-        configurer.enable();
+        configurer.enable("default"); // Chỉ định rõ ràng tên servlet mặc định
     }
 
 //    @Override
@@ -52,11 +52,11 @@ public class WebAppContextConfigs implements WebMvcConfigurer {
         registry.addResourceHandler("/js/**").addResourceLocations("classpath:/static/js/");
     }                                                             //vi tri that su cua no
 
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-//                .allowedOrigins("http://localhost:3000")
-                .allowedMethods("GET", "POST", "PUT", "DELETE")
-                .allowedHeaders("*");
-    }
+//    @Override
+//    public void addCorsMappings(CorsRegistry registry) {
+//        registry.addMapping("/api/**")
+////                .allowedOrigins("http://localhost:3000")
+//                .allowedMethods("GET", "POST", "PUT", "DELETE")
+//                .allowedHeaders("*");
+//    }
 }
