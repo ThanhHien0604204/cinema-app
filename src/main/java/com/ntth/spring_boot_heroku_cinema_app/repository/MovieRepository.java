@@ -21,4 +21,6 @@ public interface MovieRepository extends MongoRepository<Movie, String> {
     Page<Movie> findByMovieDateStartBetween(LocalDate from, LocalDate to, Pageable pageable);
 
     Page<Movie> findByRatingGreaterThanEqual(Double minRating, Pageable pageable);
+    //tìm chứa từ khóa (khuyến nghị)
+    List<Movie> findByTitleRegexIgnoreCase(String regex);
 }
