@@ -1,5 +1,6 @@
 package com.ntth.spring_boot_heroku_cinema_app.controller;
 
+import com.ntth.spring_boot_heroku_cinema_app.dto.CreateShowtimeRequest;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ShowtimeResponse;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Movie;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Showtime;
@@ -80,8 +81,8 @@ public class ShowtimeController {
     }
 
     @PostMapping
-    public Showtime create(@Valid @RequestBody Showtime dto) {
-        return showtimeRepository.save(dto);
+    public Showtime create(@Valid @RequestBody CreateShowtimeRequest dto) {
+        return showtimeService.createShowtime(dto);
     }
 
     @PutMapping("/{id}")

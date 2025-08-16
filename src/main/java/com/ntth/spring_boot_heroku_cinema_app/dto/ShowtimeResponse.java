@@ -1,6 +1,7 @@
 package com.ntth.spring_boot_heroku_cinema_app.dto;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 public record ShowtimeResponse(
         String sessionId,   // map từ entity.id
@@ -11,7 +12,8 @@ public record ShowtimeResponse(
         String endAt,
         Integer price,
         Integer totalSeats,
-        Integer availableSeats
+        Integer availableSeats,
+        LocalDate date
 ) {}
 
 

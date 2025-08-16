@@ -8,6 +8,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 @Document(collection = "showtime")
@@ -34,8 +35,8 @@ public class Showtime {
 
     @PositiveOrZero
     private Integer availableSeats;
-
-
+    @NotNull
+    private LocalDate date;
 
 
     public String getId() {
@@ -110,5 +111,12 @@ public class Showtime {
         this.availableSeats = availableSeats;
     }
 
+    public LocalDate getDate() {
+        return date;
+    }
+
+    public void setDate(LocalDate date) {
+        this.date = date;
+    }
 }
 

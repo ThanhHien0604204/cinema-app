@@ -10,7 +10,10 @@ public record CreateShowtimeRequest(
         String roomId,
         String sessionName,
         @JsonFormat(pattern = "yyyy-MM-dd") LocalDate date,
-        @Pattern(regexp="^\\d{2}:\\d{2}$") String startTime,  // "18:00"
+        @Pattern(regexp="^\\d{2}:\\d{2}$", message = "startTime must be in HH:mm format")
+        String startTime,  // "14:00"
+        @Pattern(regexp="^\\d{2}:\\d{2}$", message = "endTime must be in HH:mm format")
+        String endTime,  // "17:45"
         Integer price,
         Integer totalSeats,
         Integer availableSeats

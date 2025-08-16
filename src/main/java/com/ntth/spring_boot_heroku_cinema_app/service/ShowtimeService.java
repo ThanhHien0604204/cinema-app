@@ -36,14 +36,6 @@ public class ShowtimeService {
 
     private static final ZoneId VN = ZoneId.of("Asia/Ho_Chi_Minh");  //múi giờ VN
 
-//    public boolean reserveSeats(String showtimeId, int qty) {
-//        Query q = new Query(Criteria.where("_id").is(showtimeId)
-//                .and("availableSeats").gte(qty));
-//        Update u = new Update().inc("availableSeats", -qty);
-//        UpdateResult r = mongoTemplate.updateFirst(q, u, Showtime.class);
-//        return r.getModifiedCount() == 1;
-//    }
-
     public List<ShowtimeResponse> getAllShowtimes() {                     // sắp xếp theo thời gian
         return showtimeRepository.findAll(Sort.by("startAt").ascending())
                 .stream()
@@ -51,31 +43,37 @@ public class ShowtimeService {
                 .toList();
     }
 
-
-    Instant toInstant(LocalDate day, String hhmm, ZoneId zone) {
-        LocalTime t = LocalTime.parse(hhmm);         // "19:39"
-        return ZonedDateTime.of(day, t, zone).toInstant();
-    }
-
-    Instant buildStartAt(OffsetDateTime startDayIso, String startTime) {
-        LocalDate dayVN = startDayIso.atZoneSameInstant(VN).toLocalDate();
-        return toInstant(dayVN, startTime, VN);
-    }
-
-    Instant buildEndAt(OffsetDateTime startDayIso, String endTime) {
-        LocalDate dayVN = startDayIso.atZoneSameInstant(VN).toLocalDate();
-        return toInstant(dayVN, endTime, VN);
-    }
+//    Instant toInstant(LocalDate day, String hhmm, ZoneId zone) {
+//        LocalTime t = LocalTime.parse(hhmm);         // "19:39"
+//        return ZonedDateTime.of(day, t, zone).toInstant();
+//    }
+//
+//    Instant buildStartAt(OffsetDateTime startDayIso, String startTime) {
+//        LocalDate dayVN = startDayIso.atZoneSameInstant(VN).toLocalDate();
+//        return toInstant(dayVN, startTime, VN);
+//    }
+//
+//    Instant buildEndAt(OffsetDateTime startDayIso, String endTime) {
+//        LocalDate dayVN = startDayIso.atZoneSameInstant(VN).toLocalDate();
+//        return toInstant(dayVN, endTime, VN);
+//    }
 
     public Showtime createShowtime(@Valid CreateShowtimeRequest r) {
         // 1. Lấy phim từ DB
         Movie movie = movieRepository.findById(r.movieId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movie not found"));
-        // 2. Tạo thời gian bắt đầu và kết thúc
-        LocalTime t = LocalTime.parse(r.startTime());         // "18:00"
-        Instant startAt = ZonedDateTime.of(r.date(), t, VN).toInstant();
-        Instant endAt = startAt.plus(movie.getDurationMinutes(), ChronoUnit.MINUTES);
-        // 3. Tạo và gán giá trị cho Showtime
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy phim"));
+        // 2. Parse giờ bắt đầu và kết thúc từ request
+        LocalTime startTime = parseTime(r.startTime()); // "14:00"
+        LocalTime endTime = parseTime(r.endTime());     // "17:45"
+
+        // 3. Tạo Instant từ date + giờ, múi giờ VN
+        Instant startAt = ZonedDateTime.of(r.date(), startTime, VN).toInstant();
+        Instant endAt = ZonedDateTime.of(r.date(), endTime, VN).toInstant();
+        // 4. Kiểm tra endAt phải lớn hơn startAt
+        if (!endAt.isAfter(startAt)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "endTime phải sau startTime");
+        }
+        // 5. Tạo và gán giá trị cho Showtime
         Showtime s = new Showtime();
         s.setMovieId(r.movieId());
         s.setRoomId(r.roomId());
@@ -85,8 +83,9 @@ public class ShowtimeService {
         s.setPrice(r.price());
         s.setTotalSeats(r.totalSeats());
         s.setAvailableSeats(r.availableSeats());
+        s.setDate(r.date());
 
-        // 4 RÀNG BUỘC: không cho trùng khung giờ cùng roomId
+        // 6 RÀNG BUỘC: không cho trùng khung giờ cùng roomId
         // overlap khi (startAt < newEndAt) && (endAt > newStartAt)
         boolean overlap = mongo.exists(
                 new Query(new Criteria().andOperator(
@@ -97,12 +96,19 @@ public class ShowtimeService {
                 Showtime.class
         );
         if (overlap) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Room time overlapped");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Thời gian phòng chồng chéo");
         }
         // 5. Lưu vào DB
         return showtimeRepository.save(s);
     }
-
+    // Phương thức parseTime để xử lý "HH:mm"
+    private LocalTime parseTime(String timeStr) {
+        try {
+            return LocalTime.parse(timeStr); // Định dạng kỳ vọng: "HH:mm"
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid time format. Use HH:mm (e.g., 14:00)");
+        }
+    }
     public Showtime updateShowtime(String id, @Valid Showtime s) {
         var current = showtimeRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Showtime not found"));
@@ -116,6 +122,7 @@ public class ShowtimeService {
         current.setPrice(s.getPrice());
         current.setTotalSeats(s.getTotalSeats());
         current.setAvailableSeats(s.getAvailableSeats());
+        current.setDate(s.getDate());
 
         // tính endAt nếu cần
         if (current.getEndAt() == null) {

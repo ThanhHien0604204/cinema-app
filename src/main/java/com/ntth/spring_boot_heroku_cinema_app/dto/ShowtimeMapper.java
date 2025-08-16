@@ -18,7 +18,8 @@ public class ShowtimeMapper {
                 : s.getEndAt().atZone(VN).toLocalTime().format(HHMM);
         return new ShowtimeResponse(
                 s.getId(), s.getMovieId(), s.getRoomId(), s.getSessionName(),
-                start, end, s.getPrice(), s.getTotalSeats(), s.getAvailableSeats()
+                start, end, s.getPrice(), s.getTotalSeats(), s.getAvailableSeats(),
+                s.getDate()
         );
     }
 }
