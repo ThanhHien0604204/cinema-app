@@ -59,9 +59,11 @@ public class ShowtimeService {
 //    }
 
     public Showtime createShowtime(@Valid CreateShowtimeRequest r) {
+        System.out.println("Đã nhận được yêu cầu: " + r);
         // 1. Lấy phim từ DB
         Movie movie = movieRepository.findById(r.movieId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy phim"));
+        System.out.println("Found movie: " + movie);
         // 2. Parse giờ bắt đầu và kết thúc từ request
         LocalTime startTime = parseTime(r.startTime()); // "14:00"
         LocalTime endTime = parseTime(r.endTime());     // "17:45"
