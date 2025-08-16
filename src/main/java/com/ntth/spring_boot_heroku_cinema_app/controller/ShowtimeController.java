@@ -41,7 +41,7 @@ public class ShowtimeController {
 //        return showtimeRepository.findByStartAtBetween(from, to, PageRequest.of(page, size, Sort.by("startAt").ascending()));
 //    }
     @GetMapping
-    public List<Showtime> getAllShowtimes() {
+    public List<ShowtimeResponse> getAllShowtimes() {
         return showtimeService.getAllShowtimes();
     }
     // Lịch chiếu theo phim trong ngày (dùng ngày địa phương)
@@ -83,6 +83,7 @@ public class ShowtimeController {
     public Showtime create(@Valid @RequestBody Showtime dto) {
         return showtimeRepository.save(dto);
     }
+
     @PutMapping("/{id}")
     public Showtime update(@PathVariable String id, @RequestBody @Valid Showtime s) {
         return showtimeService.updateShowtime(id, s);

@@ -7,8 +7,8 @@ public record ShowtimeResponse(
         String movieId,
         String roomId,
         String sessionName,
-        Instant startAt,
-        Instant endAt,
+        String startAt, // "18:00"
+        String endAt,
         Integer price,
         Integer totalSeats,
         Integer availableSeats
