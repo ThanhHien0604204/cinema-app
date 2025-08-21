@@ -14,7 +14,6 @@ public interface MovieRepository extends MongoRepository<Movie, String> {
     Page<Movie> findByTitleRegexIgnoreCase(String titlePattern, Pageable pageable);
 
     // filter theo thể loại
-    //Page<Movie> findByGenreIgnoreCase(String genre, Pageable pageable);
     Page<Movie> findByGenreIdsContaining(String genreId, Pageable pageable);
 
     // phim sắp chiếu trong khoảng ngày

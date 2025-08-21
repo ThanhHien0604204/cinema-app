@@ -15,6 +15,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 import org.springframework.web.server.ResponseStatusException;
@@ -44,20 +45,25 @@ public class MovieController {
     }
 
     // tăng số lượt xem (views) khi người dùng xem chi tiết
+    @Transactional
     @PostMapping("/{id}/view")
-    public void incView(@PathVariable String id) {
-        // Tìm phim theo ID, nếu tồn tại thì thực hiện tăng lượt xem
-        repo.findById(id).ifPresent(m -> {
-            m.setViews((m.getViews()==null?0//gán giá trị mặc định là 0
-                    :m.getViews()) + 1);
-            repo.save(m);
-        });
+    public ResponseEntity<String> incView(@PathVariable String id) {
+        return repo.findById(id)
+                .map(movie -> {
+                    Long currentViews = movie.getViews() != null ? movie.getViews() : 0L;
+                    movie.setViews(currentViews + 1);
+                    repo.save(movie);
+                    return ResponseEntity.ok("Số lượt xem đã tăng thành công");
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     // GET /api/movies/{id}
     @GetMapping("/{id}")
-    public Movie get(@PathVariable String id) {
-        return repo.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movie not found"));
+    public ResponseEntity<Movie> get(@PathVariable String id) {
+        return repo.findById(id)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     // GET /api/movies/upcoming?from=2025-08-01&to=2025-09-30
@@ -75,15 +81,23 @@ public class MovieController {
 
     // PUT /api/movies/{id}
     @PutMapping("/{id}")
-    public Movie update(@PathVariable String id, @Valid @RequestBody MovieRequest req) {
-        return movieService.update(id, req);
+    public ResponseEntity<Movie> update(@PathVariable String id, @Valid @RequestBody MovieRequest req) {
+        try {
+            Movie updatedMovie = movieService.update(id, req);
+            return ResponseEntity.ok(updatedMovie);
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     // DELETE /api/movies/{id}
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id) {
-        repo.deleteById(id);
-        return ResponseEntity.noContent().build();
+        if (repo.existsById(id)) {
+            repo.deleteById(id);
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.notFound().build();
     }
 
     // Search nhẹ nhàng theo tham số tuỳ chọn
