@@ -25,7 +25,7 @@ public class MovieController {
 
     @Autowired
     private MovieService movieService;
-    @Autowired
+    @Autowired // Tiêm repository để truy vấn dữ liệu từ cơ sở dữ liệu
     private final MovieRepository repo;
 
     public MovieController(MovieService service, MovieRepository repo) {
@@ -37,14 +37,22 @@ public class MovieController {
     public List<Movie> getAllMovies() {
         return movieService.getAllMovies();
     }
-//    // GET /api/movies?page=0&size=12&q=moana&genre=Hoạt%20hình
-//    @GetMapping
-//    public Page<Movie> list(@RequestParam(required = false) String q,
-//                            @RequestParam(required = false) String genre,
-//                            @RequestParam(defaultValue = "0") int page,//phân trang
-//                            @RequestParam(defaultValue = "10") int size) {
-//        return movieService.list(q, genre, page, size);
-//    }
+    @GetMapping("/hot") ///lấy danh sách các phim "hot" (dựa trên số lượt xem - views)
+    // Sử dụng PageRequest để giới hạn số lượng bản ghi trả về,limit Số lượng phim tối đa trả về, mặc định là 10
+    public List<Movie> hot(@RequestParam(defaultValue = "10") int limit) {
+        return repo.findTopByOrderByViewsDesc(PageRequest.of(0, limit));//Trang đầu tiên (0) với số lượng bản ghi là limit
+    }
+
+    // tăng số lượt xem (views) khi người dùng xem chi tiết
+    @PostMapping("/{id}/view")
+    public void incView(@PathVariable String id) {
+        // Tìm phim theo ID, nếu tồn tại thì thực hiện tăng lượt xem
+        repo.findById(id).ifPresent(m -> {
+            m.setViews((m.getViews()==null?0//gán giá trị mặc định là 0
+                    :m.getViews()) + 1);
+            repo.save(m);
+        });
+    }
 
     // GET /api/movies/{id}
     @GetMapping("/{id}")
@@ -95,7 +103,7 @@ public class MovieController {
             return repo.findByTitleRegexIgnoreCase(q, pageable);
         }
         if (genre != null && !genre.isBlank()) {
-            return repo.findByGenreIgnoreCase(genre, pageable);
+            return movieService.list(null, genre, page, size); // Sử dụng service logic
         }
         if (minRating != null) {
             return repo.findByRatingGreaterThanEqual(minRating, pageable);

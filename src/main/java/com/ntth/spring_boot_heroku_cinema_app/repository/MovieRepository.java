@@ -14,7 +14,8 @@ public interface MovieRepository extends MongoRepository<Movie, String> {
     Page<Movie> findByTitleRegexIgnoreCase(String titlePattern, Pageable pageable);
 
     // filter theo thể loại
-    Page<Movie> findByGenreIgnoreCase(String genre, Pageable pageable);
+    //Page<Movie> findByGenreIgnoreCase(String genre, Pageable pageable);
+    Page<Movie> findByGenreIdsContaining(String genreId, Pageable pageable);
 
     // phim sắp chiếu trong khoảng ngày
     List<Movie> findByMovieDateStartBetween(LocalDate from, LocalDate to);
@@ -23,4 +24,10 @@ public interface MovieRepository extends MongoRepository<Movie, String> {
     Page<Movie> findByRatingGreaterThanEqual(Double minRating, Pageable pageable);
     //tìm chứa từ khóa (khuyến nghị)
     List<Movie> findByTitleRegexIgnoreCase(String regex);
+
+    List<Movie> findTop10ByOrderByViewsDesc();
+    //lấy top phim dựa trên cột views, sắp xếp giảm dần
+    List<Movie> findTopByOrderByViewsDesc(Pageable pageable);
+    // Tùy chọn: Tìm phim theo danh sách genreIds
+    Page<Movie> findByGenreIdsIn(List<String> genreIds, Pageable pageable);
 }

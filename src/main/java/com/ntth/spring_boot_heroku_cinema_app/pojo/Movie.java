@@ -2,6 +2,8 @@ package com.ntth.spring_boot_heroku_cinema_app.pojo;
 
 
 import java.time.LocalDate;
+import java.util.List;
+
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -25,7 +27,7 @@ public class Movie {
 
     @NotBlank
     @Indexed                          // lọc theo thể loại nhanh
-    private String genre;
+    private List<String> genreIds;
 
     @NotNull
     private LocalDate movieDateStart;
@@ -37,6 +39,16 @@ public class Movie {
     private String summary;
 
     private String trailerUrl;
+
+    private Long views = 0L;
+
+    public Long getViews() {
+        return views;
+    }
+
+    public void setViews(Long views) {
+        this.views = views;
+    }
 
     public String getId() {
         return id;
@@ -70,12 +82,12 @@ public class Movie {
         this.durationMinutes = durationMinutes;
     }
 
-    public String getGenre() {
-        return genre;
+    public List<String> getGenreIds() {
+        return genreIds;
     }
 
-    public void setGenre(String genre) {
-        this.genre = genre;
+    public void setGenreIds(List<String> genreIds) {
+        this.genreIds = genreIds;
     }
 
     public LocalDate getMovieDateStart() {
