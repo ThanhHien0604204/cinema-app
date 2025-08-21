@@ -80,7 +80,7 @@ public class SpringSecurityConfigs {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws
             Exception {
         http// Dùng JWT (stateless) → tắt CSRF
-                .csrf(c -> c.disable())//Tắt tính năng CSRF
+                .csrf(csrf -> csrf.disable())//Tắt tính năng CSRF
                 // đang xây dựng hệ thống dùng JWT, không dùng session
                 //Bắt đầu cấu hình quyền truy cập cho từng endpoint
                 .authorizeHttpRequests(requests
