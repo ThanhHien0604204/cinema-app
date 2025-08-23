@@ -36,4 +36,7 @@ public class JwtProvider {//tạo & giải mã token
             return false;
         }
     }
+    public String getEmailFromToken(String token) {
+        return Jwts.parser().setSigningKey(secretKey).parseClaimsJws(token).getBody().getSubject();
+    }
 }
