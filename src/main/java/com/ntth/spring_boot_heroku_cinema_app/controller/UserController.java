@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -29,10 +30,20 @@ public class UserController {
 
     @PostMapping("/register")
     public ResponseEntity<String> register(@RequestBody User user) {
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
-        user.setRole("USER");
-        userRepo.save(user);
-        return ResponseEntity.ok("Đăng ký thành công!");
+        try {
+            if (user.getEmail() == null || user.getEmail().isEmpty()) {
+                return ResponseEntity.badRequest().body("Email không được để trống");
+            }
+            if (user.getPassword() == null || user.getPassword().isEmpty()) {
+                return ResponseEntity.badRequest().body("Mật khẩu không được để trống");
+            }
+            user.setPassword(passwordEncoder.encode(user.getPassword()));
+            user.setRole("USER");
+            userRepo.save(user);
+            return ResponseEntity.ok("Đăng ký thành công!");
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Lỗi đăng ký: " + e.getMessage());
+        }
     }
 
 //    @PostMapping("/login")
@@ -66,7 +77,10 @@ public class UserController {
             }
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Sai mật khẩu");
         } catch (HttpMessageNotReadableException e) {
-            return ResponseEntity.badRequest().body("Request body không hợp lệ hoặc bị thiếu");
+            return ResponseEntity.badRequest().body("Request body không hợp lệ hoặc bị thiếu: " + e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Lỗi server: " + e.getMessage());
         }
     }
     @GetMapping("/user/me")
