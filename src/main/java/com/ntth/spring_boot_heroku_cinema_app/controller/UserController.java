@@ -66,18 +66,18 @@ public class UserController {
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody AuthRequest request) {
         try {
-            System.out.println("Attempting to connect to MongoDB for email: " + request.getEmail());
+            System.out.println("Starting login process for email: " + request.getEmail());
             if (request == null || request.getEmail() == null || request.getEmail().isEmpty()) {
                 return ResponseEntity.badRequest().body("Email không được để trống");
             }
             if (request.getPassword() == null || request.getPassword().isEmpty()) {
                 return ResponseEntity.badRequest().body("Mật khẩu không được để trống");
             }
-
+            System.out.println("Querying MongoDB for user with email: " + request.getEmail());
 //            User user = userRepo.findByEmail(request.getEmail())
             User user = userService.findByEmailWithRetry(request.getEmail())
                     .orElseThrow(() -> new RuntimeException("Không tồn tại email"));
-            System.out.println("MongoDB connection successful, user found: " + user.getEmail());
+            System.out.println("User found in MongoDB: " + user.getEmail());
 
             if (passwordEncoder.matches(request.getPassword(), user.getPassword())) {
                 String token = jwtProvider.generateToken(user.getEmail());
