@@ -17,6 +17,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.data.mongodb.MongoDatabaseFactory;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.http.HttpMethod;
+import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -39,6 +40,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+@EnableRetry
 @EnableTransactionManagement
 @ComponentScan(basePackages = {
         "com.ntth.spring_boot_heroku_cinema_app.controller",
@@ -88,9 +90,9 @@ public class SpringSecurityConfigs {
                 .authorizeHttpRequests(requests
                         -> requests
                         //toàn bộ các request đến /api/** được truy cập công khai (không cần đăng nhập)
-                        //.requestMatchers("/api/**").permitAll()
+                        .requestMatchers("/api/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        .requestMatchers("/api/register", "/api/login").permitAll()
+                        //.requestMatchers("/api/register", "/api/login").permitAll()
 //                        .requestMatchers(HttpMethod.GET, "/products").hasRole("ADMIN")
 //                        .requestMatchers(HttpMethod.GET,
 //                                "/products/**").hasAnyRole("USER", "ADMIN")

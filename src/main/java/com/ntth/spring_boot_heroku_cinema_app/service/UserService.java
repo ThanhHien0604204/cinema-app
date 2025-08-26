@@ -1,13 +1,17 @@
 package com.ntth.spring_boot_heroku_cinema_app.service;
 
+import com.mongodb.MongoException;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 public class UserService {
@@ -28,7 +32,10 @@ public class UserService {
         userRepository.save(user);
         return "Đăng ký thành công";
     }
-
+    @Retryable(value = {MongoException.class}, maxAttempts = 3, backoff = @Backoff(delay = 5000))
+    public Optional<User> findByEmailWithRetry(String email) {
+        return userRepository.findByEmail(email);
+    }
     public User login(String email, String password) {
         // Tìm user theo email
         return userRepository.findByEmail(email)

@@ -1,5 +1,6 @@
 package com.ntth.spring_boot_heroku_cinema_app.controller;
 
+import com.mongodb.MongoException;
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtProvider;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
@@ -9,12 +10,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api")
@@ -46,7 +50,7 @@ public class UserController {
         }
     }
 
-//    @PostMapping("/login")
+    //    @PostMapping("/login")
 //    public ResponseEntity<?> login(@RequestBody AuthRequest request) {
 //        User user = userRepo.findByEmail(request.getEmail())
 //                .orElseThrow(() -> new RuntimeException("Không tồn tại email"));
@@ -58,10 +62,11 @@ public class UserController {
 //        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Sai mật khẩu");
 //    }
 
+
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody AuthRequest request) {
         try {
-            System.out.println("Cố gắng đăng nhập vào email: " + request.getEmail());
+            System.out.println("Attempting to connect to MongoDB for email: " + request.getEmail());
             if (request == null || request.getEmail() == null || request.getEmail().isEmpty()) {
                 return ResponseEntity.badRequest().body("Email không được để trống");
             }
@@ -69,9 +74,10 @@ public class UserController {
                 return ResponseEntity.badRequest().body("Mật khẩu không được để trống");
             }
 
-            User user = userRepo.findByEmail(request.getEmail())
+//            User user = userRepo.findByEmail(request.getEmail())
+            User user = userService.findByEmailWithRetry(request.getEmail())
                     .orElseThrow(() -> new RuntimeException("Không tồn tại email"));
-            System.out.println("User found: " + user.getEmail());
+            System.out.println("MongoDB connection successful, user found: " + user.getEmail());
 
             if (passwordEncoder.matches(request.getPassword(), user.getPassword())) {
                 String token = jwtProvider.generateToken(user.getEmail());
@@ -82,6 +88,14 @@ public class UserController {
 //        } catch (HttpMessageNotReadableException e) {
 //            return ResponseEntity.badRequest().body("Request body không hợp lệ hoặc bị thiếu: " + e.getMessage());
 //        }
+        } catch (com.mongodb.MongoTimeoutException e) {
+            System.out.println("MongoDB timeout: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body("Lỗi kết nối MongoDB: Timeout");
+        } catch (com.mongodb.MongoException e) {
+            System.out.println("MongoDB error: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body("Lỗi kết nối MongoDB: " + e.getMessage());
         } catch (RuntimeException e) {
             System.out.println("Runtime error: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Không tồn tại email");
