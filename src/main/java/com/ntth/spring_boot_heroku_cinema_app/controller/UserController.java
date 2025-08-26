@@ -61,6 +61,7 @@ public class UserController {
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody AuthRequest request) {
         try {
+            System.out.println("Cố gắng đăng nhập vào email: " + request.getEmail());
             if (request == null || request.getEmail() == null || request.getEmail().isEmpty()) {
                 return ResponseEntity.badRequest().body("Email không được để trống");
             }
@@ -70,19 +71,24 @@ public class UserController {
 
             User user = userRepo.findByEmail(request.getEmail())
                     .orElseThrow(() -> new RuntimeException("Không tồn tại email"));
+            System.out.println("User found: " + user.getEmail());
 
             if (passwordEncoder.matches(request.getPassword(), user.getPassword())) {
                 String token = jwtProvider.generateToken(user.getEmail());
+                System.out.println("Token generated: " + token);
                 return ResponseEntity.ok(Map.of("token", token));
             }
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Sai mật khẩu");
-        } catch (HttpMessageNotReadableException e) {
-            return ResponseEntity.badRequest().body("Request body không hợp lệ hoặc bị thiếu: " + e.getMessage());
+//        } catch (HttpMessageNotReadableException e) {
+//            return ResponseEntity.badRequest().body("Request body không hợp lệ hoặc bị thiếu: " + e.getMessage());
+//        }
         } catch (Exception e) {
+            System.out.println("Login error: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Lỗi server: " + e.getMessage());
         }
     }
+
     @GetMapping("/user/me")
     public ResponseEntity<User> getCurrentUser(@RequestHeader("Authorization") String token) {
         // Xác thực token
