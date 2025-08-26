@@ -46,12 +46,12 @@ public class JwtFilter extends OncePerRequestFilter {
 
         // 1) Lấy header Authorization
         String authHeader = request.getHeader("Authorization");
-
+        System.out.println("Authorization header: " + authHeader);
         // 2) Kiểm tra header có dạng "Bearer <token>" không
         if (StringUtils.hasText(authHeader) && authHeader.startsWith("Bearer ")) {
             // Cắt bỏ "Bearer " để lấy ra phần token thực sự
             String token = authHeader.substring(7);
-
+            System.out.println("Extracted token: " + token);
             // 3) Validate chữ ký + hạn token
             if (jwtProvider.validateToken(token)) {
 
