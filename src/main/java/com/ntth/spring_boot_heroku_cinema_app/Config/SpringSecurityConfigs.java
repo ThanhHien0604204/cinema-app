@@ -89,6 +89,7 @@ public class SpringSecurityConfigs {
                         -> requests
                         //toàn bộ các request đến /api/** được truy cập công khai (không cần đăng nhập)
                         //.requestMatchers("/api/**").permitAll()
+                        .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/register", "/api/login").permitAll()
 //                        .requestMatchers(HttpMethod.GET, "/products").hasRole("ADMIN")
 //                        .requestMatchers(HttpMethod.GET,

@@ -82,6 +82,9 @@ public class UserController {
 //        } catch (HttpMessageNotReadableException e) {
 //            return ResponseEntity.badRequest().body("Request body không hợp lệ hoặc bị thiếu: " + e.getMessage());
 //        }
+        } catch (RuntimeException e) {
+            System.out.println("Runtime error: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Không tồn tại email");
         } catch (Exception e) {
             System.out.println("Login error: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
