@@ -10,7 +10,6 @@ public class Genre {
 
     private String name;
 
-    // Getters và Setters
     public String getId() {
         return id;
     }

@@ -21,6 +21,7 @@ import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -41,6 +42,7 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 @EnableRetry
+@EnableMethodSecurity(prePostEnabled = true)
 @EnableTransactionManagement
 @ComponentScan(basePackages = {
         "com.ntth.spring_boot_heroku_cinema_app.controller",
