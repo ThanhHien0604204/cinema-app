@@ -38,6 +38,7 @@ public class MovieController {
     public List<Movie> getAllMovies() {
         return movieService.getAllMovies();
     }
+
     @GetMapping("/hot") ///lấy danh sách các phim "hot" (dựa trên số lượt xem - views)
     // Sử dụng PageRequest để giới hạn số lượng bản ghi trả về,limit Số lượng phim tối đa trả về, mặc định là 10
     public List<Movie> hot(@RequestParam(defaultValue = "10") int limit) {
