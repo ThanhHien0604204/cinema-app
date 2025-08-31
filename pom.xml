@@ -133,7 +133,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.ntth.spring_boot_heroku_cinema_app.Application</mainClass> <!-- Thay bằng main class của bạn -->
+                    <mainClass>com.ntth.spring_boot_heroku_cinema_app.SpringBootHerokuCinemaAppApplication</mainClass> <!-- Thay bằng main class của bạn -->
                 </configuration>
                 <executions>
                     <execution>

@@ -1,9 +1,0 @@
-prebuild:
-  - type: script
-    name: install_maven
-    cmd: ./mvnw -version
-build:
-  type: maven
-  cmd: ./mvnw clean package -DskipTests
-run:
-  cmd: java -jar target/spring-boot-heroku-cinema-app-0.0.1-SNAPSHOT.jar
