@@ -10,7 +10,7 @@ RUN chmod +x ./mvnw && ./mvnw clean package -DskipTests
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 # Copy JAR từ stage build (thay 'spring-boot-heroku-cinema-app-*.jar' bằng tên JAR thực tế từ target/ sau khi build local)
-COPY --from=build /app/target/spring-boot-heroku-cinema-app-*.jar app.jar
+COPY --from=build /app/target/spring-boot-heroku-cinema-app-0.0.1-SNAPSHOT.jar app.jar
 # Expose port (Render dùng biến PORT, Spring Boot sẽ tự detect)
 EXPOSE 8080
 ENTRYPOINT ["sh", "-c", "java -jar /app/app.jar"]
