@@ -4,11 +4,12 @@ import com.ntth.spring_boot_heroku_cinema_app.dto.CreateShowtimeRequest;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ShowtimeMapper;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ShowtimeResponse;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Movie;
+import com.ntth.spring_boot_heroku_cinema_app.pojo.Room;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Showtime;
 import com.ntth.spring_boot_heroku_cinema_app.repository.MovieRepository;
+import com.ntth.spring_boot_heroku_cinema_app.repository.RoomRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repository.ShowtimeRepository;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -21,7 +22,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.*;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class ShowtimeService {
@@ -33,6 +36,8 @@ public class ShowtimeService {
     private ShowtimeMapper mapper;
     @Autowired
     private MongoTemplate mongo;
+    @Autowired
+    private RoomRepository roomRepository;
 
     private static final ZoneId VN = ZoneId.of("Asia/Ho_Chi_Minh");  //múi giờ VN
 
@@ -42,21 +47,49 @@ public class ShowtimeService {
                 .map(mapper::toResponse)
                 .toList();
     }
+    public List<ShowtimeResponse> getShowtimesByCinema(String cinemaId, LocalDate dateOrNull) {
+        List<Room> rooms = roomRepository.findByCinemaId(cinemaId);
+        if (rooms.isEmpty()) return List.of();
 
-//    Instant toInstant(LocalDate day, String hhmm, ZoneId zone) {
-//        LocalTime t = LocalTime.parse(hhmm);         // "19:39"
-//        return ZonedDateTime.of(day, t, zone).toInstant();
-//    }
-//
-//    Instant buildStartAt(OffsetDateTime startDayIso, String startTime) {
-//        LocalDate dayVN = startDayIso.atZoneSameInstant(VN).toLocalDate();
-//        return toInstant(dayVN, startTime, VN);
-//    }
-//
-//    Instant buildEndAt(OffsetDateTime startDayIso, String endTime) {
-//        LocalDate dayVN = startDayIso.atZoneSameInstant(VN).toLocalDate();
-//        return toInstant(dayVN, endTime, VN);
-//    }
+        List<String> roomIds = rooms.stream().map(Room::getId).toList();
+
+        List<Showtime> showtimes;
+        if (dateOrNull == null) {
+            showtimes = showtimeRepository.findByRoomIdIn(roomIds);
+        } else {
+            var start = dateOrNull.atStartOfDay(VN).toInstant();
+            var end   = dateOrNull.plusDays(1).atStartOfDay(VN).toInstant();
+            showtimes = showtimeRepository.findByRoomIdInAndStartAtBetween(roomIds, start, end);
+        }
+
+        // Map sang DTO – tận dụng mapper bạn đang có
+        return showtimes.stream()
+                .map(mapper::toResponse)
+                .toList();
+    }
+    /** Lấy showtime theo rạp + phim, có thể lọc theo ngày; sort theo startAt ASC */
+    public List<ShowtimeResponse> getByCinemaAndMovie(String cinemaId, String movieId, LocalDate dateOrNull) {
+        List<Room> rooms = roomRepository.findByCinemaId(cinemaId);
+        if (rooms.isEmpty()) return Collections.emptyList();
+
+        List<String> roomIds = rooms.stream()
+                .map(Room::getId)
+                .collect(Collectors.toList());
+
+        List<Showtime> showtimes;
+        if (dateOrNull == null) {
+            showtimes = showtimeRepository.findByRoomIdInAndMovieIdOrderByStartAtAsc(roomIds, movieId);
+        } else {
+            Instant start = dateOrNull.atStartOfDay(VN).toInstant();
+            Instant end   = dateOrNull.plusDays(1).atStartOfDay(VN).toInstant();
+            showtimes = showtimeRepository.findByRoomIdInAndMovieIdAndStartAtBetweenOrderByStartAtAsc(
+                    roomIds, movieId, start, end
+            );
+        }
+        return showtimes.stream()
+                .map(mapper::toResponse)
+                .collect(Collectors.toList());
+    }
 
     public Showtime createShowtime(@Valid CreateShowtimeRequest r) {
         System.out.println("Đã nhận được yêu cầu: " + r);

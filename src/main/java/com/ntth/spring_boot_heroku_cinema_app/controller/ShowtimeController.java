@@ -32,15 +32,10 @@ public class ShowtimeController {
     @Autowired
     private MovieRepository movieRepository;
 
-    // Danh sách lịch chiếu theo khoảng ngày (UTC)
-//    @GetMapping
-//    public Page<Showtime> list(
-//            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
-//            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
-//            @RequestParam(defaultValue="0") int page,
-//            @RequestParam(defaultValue="10") int size) {
-//        return showtimeRepository.findByStartAtBetween(from, to, PageRequest.of(page, size, Sort.by("startAt").ascending()));
-//    }
+    public ShowtimeController(ShowtimeService showtimeService) {
+        this.showtimeService = showtimeService;
+    }
+
     @GetMapping
     public List<ShowtimeResponse> getAllShowtimes() {
         return showtimeService.getAllShowtimes();
@@ -73,6 +68,32 @@ public class ShowtimeController {
         // 3) Truy vấn showtime theo nhiều movieId trong khoảng ngày
         return showtimeRepository.findByMovieIdInAndStartAtBetween(
                 movieIds, from, to, PageRequest.of(page, size, Sort.by("startAt").ascending()));
+    }
+    /**
+     * GET /api/cinemas/{cinemaId}/showtimes?date=2025-08-25
+     * date: (optional) lọc trong ngày; nếu bỏ qua sẽ trả tất cả
+     */
+    @GetMapping("/{cinemaId}/showtimes")
+    public List<ShowtimeResponse> getByCinema(
+            @PathVariable String cinemaId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
+        return showtimeService.getShowtimesByCinema(cinemaId, date);
+    }
+    /**
+     * GET /api/cinemas/{cinemaId}/movies/{movieId}/showtimes?date=2025-08-25
+     * - Lấy showtime theo rạp và theo phim
+     * - Sort theo startAt (tăng dần)
+     * - Nếu truyền ?date=YYYY-MM-DD → lọc trong ngày đó (theo Asia/Ho_Chi_Minh)
+     */
+    @GetMapping("{cinemaId}/movies/{movieId}/showtimes")
+    public List<ShowtimeResponse> getShowtimesByCinemaAndMovie(
+            @PathVariable String cinemaId,
+            @PathVariable String movieId,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
+        return showtimeService.getByCinemaAndMovie(cinemaId, movieId, date);
     }
 
     @GetMapping("/{id}")

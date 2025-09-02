@@ -12,14 +12,12 @@ import com.ntth.spring_boot_heroku_cinema_app.pojo.MovieGenre;
 import com.ntth.spring_boot_heroku_cinema_app.repository.GenreRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repository.MovieGenreRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repository.MovieRepository;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
 @Service
-@RequiredArgsConstructor
 public class MovieService {
     @Autowired
     private MovieRepository repo;
