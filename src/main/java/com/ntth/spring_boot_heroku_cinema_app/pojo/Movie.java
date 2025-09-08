@@ -29,6 +29,10 @@ public class Movie {
     @Indexed                          // lọc theo thể loại nhanh
     private List<String> genreIds;
 
+    private String author;
+
+    private List<String> actors;
+
     @NotNull
     private LocalDate movieDateStart;
 
@@ -120,5 +124,21 @@ public class Movie {
 
     public void setTrailerUrl(String trailerUrl) {
         this.trailerUrl = trailerUrl;
+    }
+
+    public String getAuthor() {
+        return author;
+    }
+
+    public void setAuthor(String author) {
+        this.author = author;
+    }
+
+    public List<String> getActors() {
+        return actors;
+    }
+
+    public void setActors(List<String> actors) {
+        this.actors = actors;
     }
 }

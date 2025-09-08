@@ -14,6 +14,8 @@ public record MovieRequest(
         @DecimalMin("0.0") @DecimalMax("10.0") Double rating,
         @NotBlank String summary,
         String trailerUrl,
+        String author,
+        List<String> actors,
         Long views
 ) {
 

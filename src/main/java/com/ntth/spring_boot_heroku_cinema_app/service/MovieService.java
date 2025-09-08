@@ -73,6 +73,8 @@ public class MovieService {
         m.setRating(r.rating());
         m.setSummary(r.summary());
         m.setTrailerUrl(r.trailerUrl());
+        m.setAuthor(r.author());
+        m.setActors(r.actors());
         m.setViews(r.views() != null ? r.views() : 0L); // Đảm bảo views không null
 
         // Lưu Movie trước để lấy ID
@@ -119,6 +121,8 @@ public class MovieService {
         m.setRating(r.rating());
         m.setSummary(r.summary());
         m.setTrailerUrl(r.trailerUrl());
+        m.setAuthor(r.author());
+        m.setActors(r.actors());
         m.setViews(r.views() != null ? r.views() : m.getViews()); // Giữ giá trị cũ nếu views null
 
         // Cập nhật genreIds
