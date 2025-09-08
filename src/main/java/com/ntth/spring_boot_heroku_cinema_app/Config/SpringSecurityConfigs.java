@@ -8,14 +8,20 @@ import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 //import com.ntth.filter.JwtFilter;
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtFilter;
+import com.ntth.spring_boot_heroku_cinema_app.pojo.Review;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.MongoDatabaseFactory;
 import org.springframework.data.mongodb.MongoTransactionManager;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.index.Index;
+import org.springframework.data.mongodb.core.index.IndexOperations;
 import org.springframework.http.HttpMethod;
 import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -134,4 +140,16 @@ public class SpringSecurityConfigs {
     public MongoTransactionManager transactionManager(MongoDatabaseFactory dbFactory) {
         return new MongoTransactionManager(dbFactory);
     }
+
+    @Bean
+    ApplicationRunner initIndexes(MongoTemplate mongo) {
+        return args -> {
+            IndexOperations ops = mongo.indexOps(Review.class);
+            ops.ensureIndex(new Index().on("movieId", Sort.Direction.ASC)
+                    .on("userId", Sort.Direction.ASC)
+                    .unique());
+            ops.ensureIndex(new Index().on("movieId", Sort.Direction.ASC));
+        };
+    }
+
 }

@@ -1,4 +1,4 @@
-package com.ntth.spring_boot_heroku_cinema_app.repository;
+package com.ntth.spring_boot_heroku_cinema_app.repositoryImpl;
 
 import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 

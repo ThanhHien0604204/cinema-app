@@ -73,7 +73,6 @@ public class MovieController {
                                 @RequestParam LocalDate to) {
         return repo.findByMovieDateStartBetween(from, to);
     }
-
     // POST /api/movies
     @PostMapping
     public ResponseEntity<Movie> create(@Valid @RequestBody MovieRequest req) {
@@ -102,7 +101,7 @@ public class MovieController {
     }
 
     // Search nhẹ nhàng theo tham số tuỳ chọn
-    @GetMapping("/search")
+    @GetMapping("/searchs")
     public Page<Movie> search(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String genre,
@@ -129,5 +128,28 @@ public class MovieController {
             return repo.findByMovieDateStartBetween(start, end, pageable);
         }
         return repo.findAll(pageable);
+    }
+    // ===== (A) API: Tìm theo thể loại =====
+    // GET /api/movies/search-by-genre?genreId=...&page=0&size=12
+    @GetMapping("/search-by-genre")
+    @ResponseStatus(HttpStatus.OK)
+    public Page<Movie> searchByGenre(
+            @RequestParam String genreId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size
+    ) {
+        return movieService.searchByGenreId(genreId, page, size);
+    }
+
+    // ===== (B) API: Tìm theo keyword (title → sang author/director/actors) =====
+    // GET /api/movies/search?q=keanu&page=0&size=12
+    @GetMapping("/search")
+    @ResponseStatus(HttpStatus.OK)
+    public Page<Movie> search(
+            @RequestParam(name = "q") String keyword,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size
+    ) {
+        return movieService.smartSearch(keyword, page, size);
     }
 }

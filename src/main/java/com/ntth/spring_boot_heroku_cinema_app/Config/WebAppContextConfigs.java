@@ -42,10 +42,6 @@ public class WebAppContextConfigs implements WebMvcConfigurer {
         configurer.enable("default"); // Chỉ định rõ ràng tên servlet mặc định
     }
 
-//    @Override
-//    public void addFormatters(FormatterRegistry registry) {
-//        registry.addFormatter(new CategoryFormatter());
-//    }
 
     @Override//dau di dg dan vat ly that tren may
     public void addResourceHandlers(ResourceHandlerRegistry registry) {

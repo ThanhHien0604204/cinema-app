@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 @RestController
@@ -70,7 +71,7 @@ public class ShowtimeController {
                 movieIds, from, to, PageRequest.of(page, size, Sort.by("startAt").ascending()));
     }
     /**
-     * GET /api/cinemas/{cinemaId}/showtimes?date=2025-08-25
+     * GET /api/showtimes/{cinemaId}/showtimes?date=2025-08-25
      * date: (optional) lọc trong ngày; nếu bỏ qua sẽ trả tất cả
      */
     @GetMapping("/{cinemaId}/showtimes")
@@ -78,23 +79,36 @@ public class ShowtimeController {
             @PathVariable String cinemaId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
     ) {
+        System.out.println("CinemaId: " + cinemaId + ", Date: " + date);
         return showtimeService.getShowtimesByCinema(cinemaId, date);
     }
     /**
-     * GET /api/cinemas/{cinemaId}/movies/{movieId}/showtimes?date=2025-08-25
+     * GET /api/showtimes/{cinemaId}/movies/{movieId}/showtimes?date=2025-08-25
      * - Lấy showtime theo rạp và theo phim
      * - Sort theo startAt (tăng dần)
      * - Nếu truyền ?date=YYYY-MM-DD → lọc trong ngày đó (theo Asia/Ho_Chi_Minh)
      */
-    @GetMapping("{cinemaId}/movies/{movieId}/showtimes")
-    public List<ShowtimeResponse> getShowtimesByCinemaAndMovie(
+    @GetMapping("/cinemas/{cinemaId}/movies/{movieId}/showtimes")
+    public List<ShowtimeResponse> getByCinemaAndMovie(
             @PathVariable String cinemaId,
             @PathVariable String movieId,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
+            @RequestParam(name = "date", required = false) String dateStr
     ) {
+        LocalDate date = null;
+        if (dateStr != null && !dateStr.isBlank()) {
+            try {
+                // Loại bỏ các ký tự không mong muốn (ví dụ: \n, \r, <EOL>)
+                String cleanedDateStr = dateStr.replaceAll("[\\n\\r\\t]", "").trim();
+                date = LocalDate.parse(cleanedDateStr); // "2025-08-25"
+            } catch (DateTimeParseException ex) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST, "Tham số 'date' phải có định dạng yyyy-MM-dd"
+                );
+            }
+        }
         return showtimeService.getByCinemaAndMovie(cinemaId, movieId, date);
     }
+
 
     @GetMapping("/{id}")
     public Showtime get(@PathVariable String id) {
@@ -102,7 +116,7 @@ public class ShowtimeController {
     }
 
     @PostMapping
-    public Showtime create(@Valid @RequestBody CreateShowtimeRequest dto) {
+    public ShowtimeResponse create(@Valid @RequestBody CreateShowtimeRequest dto) {
         return showtimeService.createShowtime(dto);
     }
 

@@ -7,6 +7,7 @@ import com.ntth.spring_boot_heroku_cinema_app.pojo.Movie;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 
 public interface MovieRepository extends MongoRepository<Movie, String> {
 
@@ -29,4 +30,17 @@ public interface MovieRepository extends MongoRepository<Movie, String> {
     List<Movie> findTopByOrderByViewsDesc(Pageable pageable);
     // Tùy chọn: Tìm phim theo danh sách genreIds
     Page<Movie> findByGenreIdsIn(List<String> genreIds, Pageable pageable);
+
+    // ====== (A) Tìm theo 1 thể loại (genreId) ======
+    Page<Movie> findByGenreIdsContains(String genreId, Pageable pageable);
+    // ====== (B) Tìm theo keyword: title OR author/director OR actors ======
+    @Query(value = "{ '$or': [ " +
+            " { 'title':   { $regex: ?0, $options: 'i' } }, " +
+            " { 'author':  { $regex: ?0, $options: 'i' } }, " +   // nếu có
+            " { 'director':{ $regex: ?0, $options: 'i' } }, " +   // nếu có
+            " { 'actors':  { $elemMatch: { $regex: ?0, $options: 'i' } } }, " + // nếu là List<String>
+            " { 'cast':    { $elemMatch: { $regex: ?0, $options: 'i' } } } " +  // nếu đặt tên 'cast'
+            "] }")
+    Page<Movie> searchByKeywordOrPeople(String keywordRegex, Pageable pageable);
+
 }

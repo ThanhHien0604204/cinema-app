@@ -43,6 +43,23 @@ public class MovieService {
         }
         return repo.findAll(pageable);
     }
+    // ===== (A) Lọc theo thể loại =====
+    public Page<Movie> searchByGenreId(String genreId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "movieDateStart"));
+        return repo.findByGenreIdsContains(genreId, pageable);
+    }
+
+    // ===== (B) Keyword: ưu tiên Title rồi dự phòng sang author/director/actors =====
+    public Page<Movie> smartSearch(String keyword, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "movieDateStart"));
+        // 1) thử theo title trước
+        String regex = ".*" + java.util.regex.Pattern.quote(keyword) + ".*";
+        Page<Movie> first = repo.findByTitleRegexIgnoreCase(regex, pageable);
+        if (!first.isEmpty()) return first;
+
+        // 2) nếu title rỗng → sang author/director/actors
+        return repo.searchByKeywordOrPeople(regex, pageable);
+    }
 
     public List<Movie> getAllMovies() {
         return repo.findAll();

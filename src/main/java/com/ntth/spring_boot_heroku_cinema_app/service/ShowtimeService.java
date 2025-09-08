@@ -5,6 +5,7 @@ import com.ntth.spring_boot_heroku_cinema_app.dto.ShowtimeMapper;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ShowtimeResponse;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Movie;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Room;
+import com.ntth.spring_boot_heroku_cinema_app.pojo.SeatLedger;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Showtime;
 import com.ntth.spring_boot_heroku_cinema_app.repository.MovieRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repository.RoomRepository;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.*;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
@@ -40,6 +42,8 @@ public class ShowtimeService {
     private RoomRepository roomRepository;
 
     private static final ZoneId VN = ZoneId.of("Asia/Ho_Chi_Minh");  //múi giờ VN
+    private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
+
 
     public List<ShowtimeResponse> getAllShowtimes() {                     // sắp xếp theo thời gian
         return showtimeRepository.findAll(Sort.by("startAt").ascending())
@@ -47,6 +51,7 @@ public class ShowtimeService {
                 .map(mapper::toResponse)
                 .toList();
     }
+
     public List<ShowtimeResponse> getShowtimesByCinema(String cinemaId, LocalDate dateOrNull) {
         List<Room> rooms = roomRepository.findByCinemaId(cinemaId);
         if (rooms.isEmpty()) return List.of();
@@ -61,37 +66,40 @@ public class ShowtimeService {
             var end   = dateOrNull.plusDays(1).atStartOfDay(VN).toInstant();
             showtimes = showtimeRepository.findByRoomIdInAndStartAtBetween(roomIds, start, end);
         }
-
         // Map sang DTO – tận dụng mapper bạn đang có
         return showtimes.stream()
                 .map(mapper::toResponse)
                 .toList();
     }
+
     /** Lấy showtime theo rạp + phim, có thể lọc theo ngày; sort theo startAt ASC */
     public List<ShowtimeResponse> getByCinemaAndMovie(String cinemaId, String movieId, LocalDate dateOrNull) {
-        List<Room> rooms = roomRepository.findByCinemaId(cinemaId);
-        if (rooms.isEmpty()) return Collections.emptyList();
+        // 1) Lấy room thuộc cinema
+        var rooms = roomRepository.findByCinemaId(cinemaId);
+        if (rooms == null || rooms.isEmpty()) return List.of();
+        var roomIds = rooms.stream().map(Room::getId).toList();
 
-        List<String> roomIds = rooms.stream()
-                .map(Room::getId)
-                .collect(Collectors.toList());
+        // 2) Build query
+        Query q = new Query();
+        q.addCriteria(Criteria.where("roomId").in(roomIds));
+        q.addCriteria(Criteria.where("movieId").is(movieId));
 
-        List<Showtime> showtimes;
-        if (dateOrNull == null) {
-            showtimes = showtimeRepository.findByRoomIdInAndMovieIdOrderByStartAtAsc(roomIds, movieId);
-        } else {
+        if (dateOrNull != null) {
             Instant start = dateOrNull.atStartOfDay(VN).toInstant();
             Instant end   = dateOrNull.plusDays(1).atStartOfDay(VN).toInstant();
-            showtimes = showtimeRepository.findByRoomIdInAndMovieIdAndStartAtBetweenOrderByStartAtAsc(
-                    roomIds, movieId, start, end
-            );
+            q.addCriteria(Criteria.where("startAt").gte(start).lt(end));
+            // Nếu bạn LƯU date là String "yyyy-MM-dd", thay bằng:
+            // q.addCriteria(Criteria.where("date").is(dateOrNull.toString()));
         }
-        return showtimes.stream()
-                .map(mapper::toResponse)
-                .collect(Collectors.toList());
+
+        q.with(Sort.by(Sort.Order.asc("date"), Sort.Order.asc("startAt")));
+
+        List<Showtime> list = mongo.find(q, Showtime.class);
+        return list.stream().map(mapper::toResponse).toList();
     }
 
-    public Showtime createShowtime(@Valid CreateShowtimeRequest r) {
+
+    public ShowtimeResponse createShowtime(@Valid CreateShowtimeRequest r) {
         System.out.println("Đã nhận được yêu cầu: " + r);
         // 1. Lấy phim từ DB
         Movie movie = movieRepository.findById(r.movieId())
@@ -108,6 +116,9 @@ public class ShowtimeService {
         if (!endAt.isAfter(startAt)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "endTime phải sau startTime");
         }
+//        Room room = roomRepository.findById(r.getRoomId())
+//                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
+
         // 5. Tạo và gán giá trị cho Showtime
         Showtime s = new Showtime();
         s.setMovieId(r.movieId());
@@ -134,7 +145,8 @@ public class ShowtimeService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Thời gian phòng chồng chéo");
         }
         // 5. Lưu vào DB
-        return showtimeRepository.save(s);
+        Showtime saved = showtimeRepository.save(s);
+        return mapper.toResponse(saved, List.of());
     }
     // Phương thức parseTime để xử lý "HH:mm"
     private LocalTime parseTime(String timeStr) {
@@ -185,5 +197,34 @@ public class ShowtimeService {
 
         return showtimeRepository.save(current);
     }
+    private ShowtimeResponse buildShowtimeResponse(Showtime s, List<String> takenSeatsOrNull) {
+        List<String> takenSeats = (takenSeatsOrNull == null) ? List.of() : takenSeatsOrNull;
 
+        String start = (s.getStartAt() == null)
+                ? null
+                : s.getStartAt().atZone(VN).toLocalTime().format(HHMM);
+
+        String end = (s.getEndAt() == null)
+                ? null
+                : s.getEndAt().atZone(VN).toLocalTime().format(HHMM);
+
+        Integer available = s.getAvailableSeats();
+        if (available == null && s.getTotalSeats() != null) {
+            available = s.getTotalSeats() - takenSeats.size();
+        }
+
+        return new ShowtimeResponse(
+                s.getId(),
+                s.getMovieId(),
+                s.getRoomId(),
+                s.getSessionName(),
+                start,
+                end,
+                s.getPrice(),
+                s.getTotalSeats(),
+                available,
+                s.getDate(),
+                takenSeats
+        );
+    }
 }

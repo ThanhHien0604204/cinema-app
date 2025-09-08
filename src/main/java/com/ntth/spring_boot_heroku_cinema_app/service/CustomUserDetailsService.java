@@ -1,7 +1,7 @@
 package com.ntth.spring_boot_heroku_cinema_app.service;
 
 
-import com.ntth.spring_boot_heroku_cinema_app.repository.CustomUserDetails;
+import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
 import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
