@@ -18,10 +18,8 @@ import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api")
@@ -105,11 +103,44 @@ public class UserController {
         return ResponseEntity.ok(user);
     }
 
+    @GetMapping("/users/{userId}")
+    public ResponseEntity<PublicUserResponse> getUserById(@PathVariable String userId) {
+        var user = userRepo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        return ResponseEntity.ok(PublicUserResponse.of(user));
+    }
+    // Batch: /api/users?ids=1,2,3 hoặc /api/users?ids=1&ids=2
     @GetMapping("/users")
-    public ResponseEntity<List<PublicUserResponse>> getUsersByIds(@RequestParam("id") List<String> ids) {
-        var users = userRepo.findAllById(ids).stream()
-                .map(PublicUserResponse::of)
-                .toList();
-        return ResponseEntity.ok(users);
+    public ResponseEntity<List<PublicUserResponse>> getUsersByIds(
+            @RequestParam(value = "ids", required = false) List<String> idsParam,  // hỗ trợ ids lặp lại
+            @RequestParam(value = "ids", required = false) String idsCsv           // hỗ trợ ids=1,2,3
+    ) {
+        // Gom tất cả về 1 list
+        Set<String> ids = new LinkedHashSet<>();
+        if (idsParam != null) {
+            for (String v : idsParam) {
+                if (v != null && !v.isBlank()) {
+                    // v có thể là "1,2,3"
+                    for (String s : v.split(",")) {
+                        s = s.trim();
+                        if (!s.isEmpty()) ids.add(s);
+                    }
+                }
+            }
+        }
+        if (idsCsv != null && !idsCsv.isBlank()) {
+            for (String s : idsCsv.split(",")) {
+                s = s.trim();
+                if (!s.isEmpty()) ids.add(s);
+            }
+        }
+
+        if (ids.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Query param 'ids' is required");
+        }
+
+        var users = userRepo.findAllById(ids);
+        var out = users.stream().map(PublicUserResponse::of).collect(Collectors.toList());
+        return ResponseEntity.ok(out);
     }
 }
