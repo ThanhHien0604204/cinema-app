@@ -11,8 +11,10 @@ import java.util.Optional;
 
 public interface ReviewRepository extends MongoRepository<Review, String> {
     Page<Review> findByMovieIdOrderByReviewTimeDesc(String movieId, Pageable pageable);
+
     Optional<Review> findByMovieIdAndUserId(String movieId, String userId);
-    // Tính trung bình + đếm
+
+    // Tính trung bình + đếm theo movieId (movieId đang là String trong collection "review")
     @Aggregation(pipeline = {
             "{ $match: { movieId: ?0 } }",
             "{ $group: { _id: '$movieId', avgRating: { $avg: '$rating' }, reviewCount: { $sum: 1 } } }"
@@ -25,5 +27,7 @@ public interface ReviewRepository extends MongoRepository<Review, String> {
     }
 
     Page<Review> findByUserIdOrderByReviewTimeDesc(String userId, Pageable pageable);
+
+    List<Review> findByMovieId(String movieId);
 }
 

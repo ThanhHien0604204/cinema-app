@@ -11,6 +11,9 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.repository.Aggregation;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,8 +25,10 @@ import java.util.Optional;
 @RequestMapping("/api/reviews")
 public class ReviewController {
 
-    @Autowired private ReviewService reviewService;
-    @Autowired private ReviewRepository reviewRepo;
+    @Autowired
+    private ReviewService reviewService;
+    @Autowired
+    private ReviewRepository reviewRepo;
 
     // Upsert review của CHÍNH TÔI cho 1 movie
     @PostMapping
@@ -37,6 +42,7 @@ public class ReviewController {
                 req.content()                      // <-- record accessor
         );
     }
+
     // 2) Lấy review của CHÍNH TÔI - PHÂN TRANG
     @GetMapping("/me")
     public Page<ReviewResponse> myReviews(@AuthenticationPrincipal CustomUserDetails me,
@@ -76,13 +82,22 @@ public class ReviewController {
     }
 
     // Tóm tắt rating (Trung bình đánh giá(avg) + Số lượng đánh giá (count))) theo movie (public)
+//    @GetMapping("/movie/{movieId}/summary")
+
+    /// /    @PreAuthorize("hasRole('ADMIN')")
+//    public MovieRatingSummary summary(@PathVariable String movieId) {
+//        var st = reviewRepo.aggregateStatsByMovie(movieId);
+//        double avg = st.map(s -> s.getAvgRating() == null ? 0d : s.getAvgRating()).orElse(0d);
+//        int cnt    = st.map(s -> s.getReviewCount() == null ? 0  : s.getReviewCount()).orElse(0);
+//        return new MovieRatingSummary(movieId, avg, cnt);
+//    }
     @GetMapping("/movie/{movieId}/summary")
-//    @PreAuthorize("hasRole('ADMIN')")
     public MovieRatingSummary summary(@PathVariable String movieId) {
-        var st = reviewRepo.aggregateStatsByMovie(movieId);
-        double avg = st.map(s -> s.getAvgRating() == null ? 0d : s.getAvgRating()).orElse(0d);
-        int cnt    = st.map(s -> s.getReviewCount() == null ? 0  : s.getReviewCount()).orElse(0);
-        return new MovieRatingSummary(movieId, avg, cnt);
+        var list = reviewRepo.findByMovieId(movieId);
+        if (list.isEmpty()) return new MovieRatingSummary(movieId, 0d, 0);
+        double avg = list.stream().mapToInt(Review::getRating).average().orElse(0d);
+        return new MovieRatingSummary(movieId, avg, list.size());
     }
+
 
 }

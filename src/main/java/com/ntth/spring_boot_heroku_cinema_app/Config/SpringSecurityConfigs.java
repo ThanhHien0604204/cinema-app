@@ -151,5 +151,9 @@ public class SpringSecurityConfigs {
             ops.ensureIndex(new Index().on("movieId", Sort.Direction.ASC));
         };
     }
+    //tạo index cho movieId để aggregate nhanh
+    @Bean ApplicationRunner initIdx(MongoTemplate mongo) {
+        return args -> mongo.indexOps(Review.class).ensureIndex(new Index().on("movieId", Sort.Direction.ASC));
+    }
 
 }
