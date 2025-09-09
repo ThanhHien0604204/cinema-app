@@ -141,15 +141,13 @@ public class MovieController {
         return movieService.searchByGenreId(genreId, page, size);
     }
 
-    // ===== (B) API: Tìm theo keyword (title → sang author/director/actors) =====
-    // GET /api/movies/search?q=keanu&page=0&size=12
+    // GET /api/movies/search?q=...&page=0&size=12
     @GetMapping("/search")
     @ResponseStatus(HttpStatus.OK)
     public Page<Movie> search(
             @RequestParam(name = "q") String keyword,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "12") int size
-    ) {
+            @RequestParam(defaultValue = "12") int size) {
         return movieService.smartSearch(keyword, page, size);
     }
 }

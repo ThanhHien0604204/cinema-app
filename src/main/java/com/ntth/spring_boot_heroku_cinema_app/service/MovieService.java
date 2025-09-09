@@ -3,6 +3,7 @@ package com.ntth.spring_boot_heroku_cinema_app.service;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.ntth.spring_boot_heroku_cinema_app.dto.MovieRequest;
@@ -14,6 +15,9 @@ import com.ntth.spring_boot_heroku_cinema_app.repository.MovieGenreRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repository.MovieRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.*;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -21,6 +25,8 @@ import org.springframework.web.client.HttpClientErrorException;
 public class MovieService {
     @Autowired
     private MovieRepository repo;
+    @Autowired
+    private MongoTemplate mongo;
     @Autowired
     private GenreRepository genreRepository;
     @Autowired
@@ -49,16 +55,24 @@ public class MovieService {
         return repo.findByGenreIdsContains(genreId, pageable);
     }
 
-    // ===== (B) Keyword: ưu tiên Title rồi dự phòng sang author/director/actors =====
+    // ===== B) Smart search: title trước, fallback author/actors =====
     public Page<Movie> smartSearch(String keyword, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "movieDateStart"));
-        // 1) thử theo title trước
-        String regex = ".*" + java.util.regex.Pattern.quote(keyword) + ".*";
-        Page<Movie> first = repo.findByTitleRegexIgnoreCase(regex, pageable);
-        if (!first.isEmpty()) return first;
+        String safe = Pattern.quote(keyword);
 
-        // 2) nếu title rỗng → sang author/director/actors
-        return repo.searchByKeywordOrPeople(regex, pageable);
+        // 1) by title
+        Query q1 = new Query(Criteria.where("title").regex(safe, "i")).with(pageable);
+        List<Movie> first = mongo.find(q1, Movie.class);
+        long c1 = mongo.count(Query.of(q1).limit(-1).skip(-1), Movie.class);
+        if (c1 > 0) return new PageImpl<>(first, pageable, c1);
+
+        // 2) fallback by people: author OR actors (List<String>)
+        Criteria byAuthor = Criteria.where("author").regex(safe, "i");
+        Criteria byActors = Criteria.where("actors").elemMatch(Criteria.where("$regex").is(safe).and("$options").is("i"));
+        Query q2 = new Query(new Criteria().orOperator(byAuthor, byActors)).with(pageable);
+        List<Movie> data = mongo.find(q2, Movie.class);
+        long total = mongo.count(Query.of(q2).limit(-1).skip(-1), Movie.class);
+        return new PageImpl<>(data, pageable, total);
     }
 
     public List<Movie> getAllMovies() {
