@@ -1,6 +1,7 @@
 package com.ntth.spring_boot_heroku_cinema_app.controller;
 
 import com.mongodb.MongoException;
+import com.ntth.spring_boot_heroku_cinema_app.dto.PublicUserResponse;
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtProvider;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
@@ -15,8 +16,10 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -49,19 +52,6 @@ public class UserController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Lỗi đăng ký: " + e.getMessage());
         }
     }
-
-    //    @PostMapping("/login")
-//    public ResponseEntity<?> login(@RequestBody AuthRequest request) {
-//        User user = userRepo.findByEmail(request.getEmail())
-//                .orElseThrow(() -> new RuntimeException("Không tồn tại email"));
-//
-//        if (passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-//            String token = jwtProvider.generateToken(user.getEmail());
-//            return ResponseEntity.ok(Map.of("token", token));
-//        }
-//        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Sai mật khẩu");
-//    }
-
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody AuthRequest request) {
@@ -113,5 +103,13 @@ public class UserController {
         User user = userRepo.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy người dùng"));
         return ResponseEntity.ok(user);
+    }
+
+    @GetMapping("/users")
+    public ResponseEntity<List<PublicUserResponse>> getUsersByIds(@RequestParam("id") List<String> ids) {
+        var users = userRepo.findAllById(ids).stream()
+                .map(PublicUserResponse::of)
+                .toList();
+        return ResponseEntity.ok(users);
     }
 }
