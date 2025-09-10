@@ -33,6 +33,7 @@ public class MovieController {
         this.movieService = service;
         this.repo = repo;
     }
+
     // GET /api/movies
     @GetMapping
     public List<Movie> getAllMovies() {
@@ -73,6 +74,8 @@ public class MovieController {
                                 @RequestParam LocalDate to) {
         return repo.findByMovieDateStartBetween(from, to);
     }
+
+    //ADMIN
     // POST /api/movies
     @PostMapping
     public ResponseEntity<Movie> create(@Valid @RequestBody MovieRequest req) {

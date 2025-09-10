@@ -23,6 +23,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.index.IndexOperations;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
@@ -33,6 +34,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.web.cors.CorsConfiguration;
@@ -98,17 +100,46 @@ public class SpringSecurityConfigs {
                 .authorizeHttpRequests(requests
                         -> requests
                         //toàn bộ các request đến /api/** được truy cập công khai (không cần đăng nhập)
-                        .requestMatchers("/api/**").permitAll()
+                        //.requestMatchers("/api/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        //.requestMatchers("/api/register", "/api/login").permitAll()
+                        // Public: login
+                        .requestMatchers(HttpMethod.POST, "/api/login","/api/register").permitAll()
+
+                        // Public: đọc dữ liệu chung
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/movies/**",
+                                "/api/genres/**",
+                                "/api/users/**"             // GET /api/users/{id} và GET /api/users?ids=...
+                        ).permitAll()
+
+                        // Public: list & summary review theo movie
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/reviews/movie/*",
+                                "/api/reviews/movie/*/summary"
+                        ).permitAll()
+
+                        // Cần đăng nhập: review của tôi / upsert / delete
+                        .requestMatchers(HttpMethod.GET,  "/api/reviews/movie/*/me").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/reviews").authenticated()
+                        .requestMatchers(HttpMethod.DELETE,"/api/reviews/**").authenticated()
+
+                        // Cần đăng nhập: chỉnh sửa hồ sơ & đổi mật khẩu
+                        .requestMatchers(HttpMethod.PUT,   "/api/users/me").authenticated()
+                        .requestMatchers(HttpMethod.PATCH, "/api/users/me/password").authenticated()
+
+
+                        // ADMIN: Quản lý phim, thể loại, người dùng
 //                        .requestMatchers(HttpMethod.GET, "/products").hasRole("ADMIN")
 //                        .requestMatchers(HttpMethod.GET,
 //                                "/products/**").hasAnyRole("USER", "ADMIN")
-                        .anyRequest().authenticated())//Tất cả request khác ngoài /api/** bắt buộc phải đăng nhập
-//                .formLogin(form -> form.loginPage("/login")
-//                        .loginProcessingUrl("/login")
-//                        .defaultSuccessUrl("/", true)
-//                        .failureUrl("/login?error=true").permitAll())
+//                        .anyRequest().authenticated())//Tất cả request khác ngoài /api/** bắt buộc phải đăng nhập
+                        // Các request khác: cho qua
+                        .anyRequest().permitAll()
+                )
+                // Xử lý 401/403 gọn gàng
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)) // 401 khi chưa đăng nhập
+                )
                 // Chèn JwtFilter "trước" filter mặc định UsernamePasswordAuthenticationFilter
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .logout(logout -> logout.logoutSuccessUrl("/login").permitAll());

@@ -1,19 +1,25 @@
 package com.ntth.spring_boot_heroku_cinema_app.controller;
 
 import com.mongodb.MongoException;
+import com.ntth.spring_boot_heroku_cinema_app.dto.ChangePasswordRequest;
 import com.ntth.spring_boot_heroku_cinema_app.dto.PublicUserResponse;
+import com.ntth.spring_boot_heroku_cinema_app.dto.UpdateUserRequest;
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtProvider;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
 import com.ntth.spring_boot_heroku_cinema_app.dto.AuthRequest;
+import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
 import com.ntth.spring_boot_heroku_cinema_app.service.UserService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -32,6 +38,11 @@ public class UserController {
     private JwtProvider jwtProvider;
     @Autowired
     private BCryptPasswordEncoder passwordEncoder;
+
+    public UserController(UserRepository userRepo, BCryptPasswordEncoder passwordEncoder) {
+        this.userRepo = userRepo;
+        this.passwordEncoder = passwordEncoder;
+    }
 
     @PostMapping("/register")
     public ResponseEntity<String> register(@RequestBody User user) {
@@ -142,5 +153,54 @@ public class UserController {
         var users = userRepo.findAllById(ids);
         var out = users.stream().map(PublicUserResponse::of).collect(Collectors.toList());
         return ResponseEntity.ok(out);
+    }
+
+    // 1) Cập nhật thông tin người dùng hiện tại (userName, email)
+    @PutMapping("/users/me")
+    public PublicUserResponse updateMe(@Valid @RequestBody UpdateUserRequest req,
+                                       @AuthenticationPrincipal CustomUserDetails me) {
+        User u = userRepo.findById(me.getUser().getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        // userName
+        if (req.userName != null) {
+            String name = req.userName.trim();
+            if (!name.isEmpty()) u.setUserName(name);
+        }
+
+        // email (nếu đổi email -> kiểm tra trùng)
+        if (req.email != null) {
+            String emailNew = req.email.trim().toLowerCase();
+            if (!emailNew.equalsIgnoreCase(u.getEmail())) {
+                if (userRepo.existsByEmail(emailNew))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Email đã được sử dụng");
+                u.setEmail(emailNew);
+                // Lưu ý: JWT của bạn dùng subject=email. Sau khi đổi email, token cũ sẽ không hợp lệ -> client nên đăng nhập lại.
+            }
+        }
+        userRepo.save(u);
+        return PublicUserResponse.of(u);
+    }
+
+    // 2) Đổi mật khẩu người dùng hiện tại
+    @PatchMapping("/users/me/password")
+    public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
+                                               @AuthenticationPrincipal CustomUserDetails me) {
+        User u = userRepo.findById(me.getUser().getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        if (!passwordEncoder.matches(req.currentPassword, u.getPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu hiện tại không đúng");
+        }
+        if (!req.newPassword.equals(req.confirmNewPassword)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Xác nhận mật khẩu không khớp");
+        }
+        if (passwordEncoder.matches(req.newPassword, u.getPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu mới không được trùng mật khẩu cũ");
+        }
+
+        u.setPassword(passwordEncoder.encode(req.newPassword));
+        userRepo.save(u);
+        return ResponseEntity.noContent().build(); // 204
     }
 }

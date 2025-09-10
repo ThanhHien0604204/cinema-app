@@ -41,6 +41,7 @@ public class ShowtimeController {
     public List<ShowtimeResponse> getAllShowtimes() {
         return showtimeService.getAllShowtimes();
     }
+
     // Lịch chiếu theo phim trong ngày (dùng ngày địa phương)
     @GetMapping("/by-movie/{movieTitle}")
     public Page<Showtime> byMovieTitleAndDate(
@@ -115,6 +116,7 @@ public class ShowtimeController {
         return showtimeRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
     }
 
+    // ADMIN
     @PostMapping
     public ShowtimeResponse create(@Valid @RequestBody CreateShowtimeRequest dto) {
         return showtimeService.createShowtime(dto);
