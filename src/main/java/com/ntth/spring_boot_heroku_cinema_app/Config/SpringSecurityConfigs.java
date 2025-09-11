@@ -102,6 +102,7 @@ public class SpringSecurityConfigs {
                         //toàn bộ các request đến /api/** được truy cập công khai (không cần đăng nhập)
                         //.requestMatchers("/api/**").permitAll()
                         .requestMatchers("/error").permitAll()
+                                .requestMatchers("/api/payments/zalopay/ipn").permitAll()
                         // Public: login
                         .requestMatchers(HttpMethod.POST, "/api/login","/api/register").permitAll()
 
@@ -126,7 +127,10 @@ public class SpringSecurityConfigs {
                         // Cần đăng nhập: chỉnh sửa hồ sơ & đổi mật khẩu
                         .requestMatchers(HttpMethod.PUT,   "/api/users/me").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/users/me/password").authenticated()
-
+                                .requestMatchers("/api/showtimes/**",
+                                        "/api/bookings/**",
+                                        "/api/payments/zalopay/create",
+                                        "/api/bookings/zalopay").authenticated()
 
                         // ADMIN: Quản lý phim, thể loại, người dùng
 //                        .requestMatchers(HttpMethod.GET, "/products").hasRole("ADMIN")

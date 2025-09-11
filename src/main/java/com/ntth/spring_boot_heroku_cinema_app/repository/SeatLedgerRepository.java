@@ -9,7 +9,7 @@ import java.util.Optional;
 public interface SeatLedgerRepository
         extends MongoRepository<SeatLedger, String>, SeatLedgerRepositoryCustom {
 
-    Optional<SeatLedger> findById(String id); // id = showtimeId + "#" + seat
-    List<SeatLedger> findByShowtimeIdAndStateIn(String showtimeId, List<String> states);
-    long countByShowtimeIdAndState(String showtimeId, String state);
+    List<SeatLedger> findByShowtimeIdAndSeatIn(String showtimeId, List<String> seats);
+    List<SeatLedger> findByShowtimeId(String showtimeId);
+    Optional<SeatLedger> findById(String id); // id format: showtimeId + "#" + seat
 }

@@ -48,10 +48,11 @@ public class TicketService {
      *
      * @param holdId id của seat lock
      * @param userId chủ sở hữu
-     * @param paymentMethod "CASH" | "VNPAY"
+     * @param paymentMethod "CASH" | "ZALOPAY"
      */
     /**
      * Tạo booking từ hold: trạng thái PENDING_PAYMENT (ZaloPay)
+     * =>tạo PENDING_PAYMENT và đợi IPN xác nhận
      */
     @Transactional
     public Ticket createBookingZaloPay(String holdId, String userId) {
@@ -69,7 +70,7 @@ public class TicketService {
             throw new ResponseStatusException(HttpStatus.GONE, "HOLD_EXPIRED");
         }
 
-        // 2) Tạo booking code
+        // 2) Tạo booking code CASH/DEFAULT: xác nhận ngay
         String bookingCode = genCode(); // ví dụ UIN-XXXXXX
 
         // 3) Lập booking ban đầu
@@ -78,33 +79,22 @@ public class TicketService {
         b.setUserId(userId);
         b.setShowtimeId(hold.getShowtimeId());
         b.setSeats(new ArrayList<>(hold.getSeats()));
-        b.setAmount(hold.getAmount());
+        try { b.setAmount(hold.getAmount()); } catch (Throwable ignore) {}
         b.setHoldId(holdId);
         b.setStatus("PENDING_PAYMENT");
         b.setCreatedAt(Instant.now());
-        Ticket.PaymentInfo p = new Ticket.PaymentInfo();
-        p.setGateway("ZALOPAY");
-//        if ("CASH".equalsIgnoreCase(paymentMethod)) {
-//            p.setGateway("CASH");
-//            b.setStatus("CONFIRMED"); // xác nhận ngay
-//        } else {
-//            p.setGateway(paymentMethod.toUpperCase(Locale.ROOT));
-//            b.setStatus("PENDING_PAYMENT");
-//        }
-        b.setPayment(p);
+
+        // (nếu Ticket có inner class PaymentInfo)
+        try {
+            Ticket.PaymentInfo payment = new Ticket.PaymentInfo();
+            payment.setGateway("ZALOPAY");
+            b.setPayment(payment);
+        } catch (Throwable ignore) {
+            // Nếu không có PaymentInfo trong model của bạn thì bỏ qua block này
+        }
 
         // 4) Lưu booking
-        ticketRepo.save(b);
-//        // 5) Nếu CASH: chuyển ledger từ HOLD -> CONFIRMED cho tất cả ghế
-//        if ("CONFIRMED".equals(b.getStatus())) {
-//            long updated = ledgerRepo.confirmMany(hold.getShowtimeId(), hold.getSeats(), b.getId(), holdId);
-//            if (updated != hold.getSeats().size()) {
-//                // Không chuyển được đủ ghế ⇒ rollback transaction
-//                throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
-//            }
-//        }
-
-        return b;
+        return ticketRepo.save(b);
     }
 
     /**
@@ -120,8 +110,7 @@ public class TicketService {
 
     /**
      * Xác nhận IPN từ ZaloPay (status=1 là thanh toán thành công) để xác nhận thanh toán và cập nhật trạng thái vé
-     Tham số:
-     - req: Map chứa dữ liệu IPN từ ZaloPay, bao gồm "data" và "mac" để xác minh
+     → xác minh thành công ⇒ b.setStatus("CONFIRMED")
      */
     @Transactional
     public void handleZpIpn(Map<String, String> req) {
@@ -211,12 +200,59 @@ public class TicketService {
         } else {
             // 17. Trường hợp thanh toán thất bại (status != 1)
             // cập nhật trạng thái vé thành CANCELED
-            //log.warn("Payment failed for bookingCode: {}, status: {}", bookingCode, status);
             b.setStatus("CANCELED");
             ticketRepo.save(b);
             // Giải phóng ghế trong ledger (nếu cần)
             //ledgerRepo.releaseSeats(b.getShowtimeId(), b.getSeats(), b.getHoldId());
         }
+    }
+    @Transactional
+    public Ticket createBookingFromHold(String holdId, String userId, String paymentMethod) {
+        // 1) Load hold
+        SeatLock hold = lockRepo.findById(holdId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.GONE, "HOLD_EXPIRED_OR_NOT_FOUND"));
+
+        // 1.1) Chủ sở hữu
+        if (!Objects.equals(hold.getUserId(), userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
+        }
+        // 1.2) Chưa hết hạn
+        if (hold.getExpiresAt() == null || hold.getExpiresAt().isBefore(Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.GONE, "HOLD_EXPIRED");
+        }
+
+        // 2) Rẽ nhánh theo phương thức thanh toán
+        String method = (paymentMethod == null ? "" : paymentMethod).trim().toUpperCase(Locale.ROOT);
+        if ("ZALOPAY".equals(method)) {
+            // Giữ nguyên flow ZaloPay: tạo booking PENDING_PAYMENT, xác nhận qua IPN
+            return createBookingZaloPay(holdId, userId);
+        }
+
+        //3) Tạo ticket trạng thái CONFIRMED (snapshot số tiền từ hold)
+        if ("CASH".equals(method) || method.isEmpty()) {
+            String bookingCode = genCode();
+
+            Ticket b = new Ticket();
+            b.setUserId(userId);
+            b.setShowtimeId(hold.getShowtimeId());
+            b.setSeats(new ArrayList<>(hold.getSeats()));
+            b.setAmount(hold.getAmount());      // SeatLock có getAmount()
+            b.setHoldId(holdId);
+            b.setBookingCode(bookingCode);
+            b.setStatus("CONFIRMED");
+            b = ticketRepo.save(b);
+            // 3.2) Đổi ledger: HOLD -> CONFIRMED theo bookingId & holdId (đảm bảo đúng chủ hold + còn hạn)
+            long updated = ledgerRepo.confirmMany(hold.getShowtimeId(), hold.getSeats(), b.getId(), holdId);
+            if (updated != hold.getSeats().size()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
+            }
+            // 3.3) Xoá SeatLock
+            lockRepo.deleteById(holdId);
+            return b;
+        }
+
+        // 5) Không hỗ trợ phương thức khác
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "UNSUPPORTED_PAYMENT_METHOD");
     }
 
     /**

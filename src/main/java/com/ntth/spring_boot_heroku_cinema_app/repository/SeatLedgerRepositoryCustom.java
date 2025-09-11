@@ -1,13 +1,23 @@
 package com.ntth.spring_boot_heroku_cinema_app.repository;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface SeatLedgerRepositoryCustom {
-    /**
-     * CONFIRM 1 ghế: chỉ thành công khi hiện tại đang HOLD bởi holdId tương ứng.
-     * Trả về true nếu cập nhật thành công (1 doc).
-     */
-    boolean confirm(String showtimeId, String seat, String bookingId, String holdId);
+    // FREE -> HOLD (lock)
+    long holdSeats(String showtimeId, List<String> seats, String holdId, Instant expiresAt);
+
+    // HOLD -> CONFIRMED (by hold)
+    long confirmSeatsByHold(String showtimeId, List<String> seats, String holdId, String bookingId);
+
+    // HOLD -> FREE (release by hold)
+    long releaseSeatsByHold(String showtimeId, List<String> seats, String holdId);
+
+    // HOLD (expired) -> FREE (background cleanup)
+    long releaseExpiredLocks(Instant now);
+
+    // CONFIRMED -> FREE (cancel by booking)
+    long releaseSeatsByBookingId(String bookingId);
     /**
      * CONFIRM nhiều ghế atomically; trả về số ghế được cập nhật.
      */

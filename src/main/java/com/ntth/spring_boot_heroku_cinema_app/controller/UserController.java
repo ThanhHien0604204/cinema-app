@@ -1,13 +1,10 @@
 package com.ntth.spring_boot_heroku_cinema_app.controller;
 
 import com.mongodb.MongoException;
-import com.ntth.spring_boot_heroku_cinema_app.dto.ChangePasswordRequest;
-import com.ntth.spring_boot_heroku_cinema_app.dto.PublicUserResponse;
-import com.ntth.spring_boot_heroku_cinema_app.dto.UpdateUserRequest;
+import com.ntth.spring_boot_heroku_cinema_app.dto.*;
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtProvider;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
-import com.ntth.spring_boot_heroku_cinema_app.dto.AuthRequest;
 import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
 import com.ntth.spring_boot_heroku_cinema_app.service.UserService;
 import jakarta.validation.Valid;
@@ -203,4 +200,5 @@ public class UserController {
         userRepo.save(u);
         return ResponseEntity.noContent().build(); // 204
     }
+
 }

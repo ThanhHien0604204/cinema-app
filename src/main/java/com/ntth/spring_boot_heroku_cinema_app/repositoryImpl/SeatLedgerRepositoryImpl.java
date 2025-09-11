@@ -10,6 +10,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 
 @Repository
@@ -21,34 +22,34 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
         this.mongo = mongo;
     }
 
+    /** FREE -> HOLD (lock theo holdId, set TTL) */
     @Override
-    public boolean confirm(String showtimeId, String seat, String bookingId, String holdId) {
-        String id = showtimeId + "#" + seat;
+    public long holdSeats(String showtimeId, List<String> seats, String holdId, Instant expiresAt) {
         Query q = new Query();
-        q.addCriteria(Criteria.where("_id").is(id));
-        q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
-        q.addCriteria(Criteria.where("refType").is("LOCK"));
-        q.addCriteria(Criteria.where("refId").is(holdId));
+        q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
+        q.addCriteria(Criteria.where("seat").in(seats));
+        q.addCriteria(Criteria.where("state").is(SeatState.FREE.name()));
 
         Update u = new Update()
-                .set("state", SeatState.CONFIRMED.name())
-                .set("refType", "BOOKING")
-                .set("refId", bookingId)
-                .unset("expiresAt");
+                .set("state", SeatState.HOLD.name())
+                .set("refType", "LOCK")
+                .set("refId", holdId)
+                .set("expiresAt", expiresAt);
 
-        UpdateResult r = mongo.updateFirst(q, u, SeatLedger.class);
-        return r.getModifiedCount() == 1;
+        UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
+        return r.getModifiedCount();
     }
 
+    /** HOLD (đúng holdId, chưa hết hạn) -> CONFIRMED (gắn bookingId) */
     @Override
-    public long confirmMany(String showtimeId, List<String> seats, String bookingId, String holdId) {
-        List<String> ids = seats.stream().map(s -> showtimeId + "#" + s).toList();
-
+    public long confirmSeatsByHold(String showtimeId, List<String> seats, String holdId, String bookingId) {
         Query q = new Query();
-        q.addCriteria(Criteria.where("_id").in(ids));
+        q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
+        q.addCriteria(Criteria.where("seat").in(seats));
         q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
         q.addCriteria(Criteria.where("refType").is("LOCK"));
         q.addCriteria(Criteria.where("refId").is(holdId));
+        q.addCriteria(Criteria.where("expiresAt").gt(Instant.now()));
 
         Update u = new Update()
                 .set("state", SeatState.CONFIRMED.name())
@@ -59,16 +60,49 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
         UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
         return r.getModifiedCount();
     }
-    @Override
-    public long freeMany(String showtimeId, List<String> seats, String bookingId) {
-        // Chỉ trả FREE những ghế hiện đang CONFIRMED bởi bookingId này
-        // (idempotent: nếu ghế đã FREE hoặc thuộc booking khác -> không update)
-        List<String> ids = seats.stream()
-                .map(s -> showtimeId + "#" + s)
-                .toList();
 
+    /** HOLD (đúng holdId) -> FREE (rollback hold) */
+    @Override
+    public long releaseSeatsByHold(String showtimeId, List<String> seats, String holdId) {
         Query q = new Query();
-        q.addCriteria(Criteria.where("_id").in(ids));
+        q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
+        q.addCriteria(Criteria.where("seat").in(seats));
+        q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
+        q.addCriteria(Criteria.where("refType").is("LOCK"));
+        q.addCriteria(Criteria.where("refId").is(holdId));
+
+        Update u = new Update()
+                .set("state", SeatState.FREE.name())
+                .unset("refType")
+                .unset("refId")
+                .unset("expiresAt");
+
+        UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
+        return r.getModifiedCount();
+    }
+
+    /** Giải phóng mọi HOLD đã hết hạn -> FREE */
+    @Override
+    public long releaseExpiredLocks(Instant now) {
+        Query q = new Query();
+        q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
+        q.addCriteria(Criteria.where("refType").is("LOCK"));
+        q.addCriteria(Criteria.where("expiresAt").lt(now));
+
+        Update u = new Update()
+                .set("state", SeatState.FREE.name())
+                .unset("refType")
+                .unset("refId")
+                .unset("expiresAt");
+
+        UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
+        return r.getModifiedCount();
+    }
+
+    /** CONFIRMED (đúng bookingId) -> FREE (khi huỷ) */
+    @Override
+    public long releaseSeatsByBookingId(String bookingId) {
+        Query q = new Query();
         q.addCriteria(Criteria.where("state").is(SeatState.CONFIRMED.name()));
         q.addCriteria(Criteria.where("refType").is("BOOKING"));
         q.addCriteria(Criteria.where("refId").is(bookingId));
@@ -77,9 +111,50 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
                 .set("state", SeatState.FREE.name())
                 .unset("refType")
                 .unset("refId")
-                .unset("expiresAt"); // FREE thì không giữ TTL
+                .unset("expiresAt");
 
         UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
-        return r.getModifiedCount(); // số ghế được trả về FREE
+        return r.getModifiedCount();
+    }
+
+    /** Giữ nguyên API tiện dụng đã khai báo trong interface */
+    @Override
+    public long confirmMany(String showtimeId, List<String> seats, String bookingId, String holdId) {
+        Query q = new Query();
+        q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
+        q.addCriteria(Criteria.where("seat").in(seats));
+        q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
+        q.addCriteria(Criteria.where("refType").is("LOCK"));
+        q.addCriteria(Criteria.where("refId").is(holdId));
+        q.addCriteria(Criteria.where("expiresAt").gt(Instant.now()));
+
+        Update u = new Update()
+                .set("state", SeatState.CONFIRMED.name())
+                .set("refType", "BOOKING")
+                .set("refId", bookingId)
+                .unset("expiresAt");
+
+        UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
+        return r.getModifiedCount();
+    }
+
+    @Override
+    public long freeMany(String showtimeId, List<String> seats, String bookingId) {
+        // Trả về FREE chỉ những ghế CONFIRMED của booking này (idempotent-safe)
+        Query q = new Query();
+        q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
+        q.addCriteria(Criteria.where("seat").in(seats));
+        q.addCriteria(Criteria.where("state").is(SeatState.CONFIRMED.name()));
+        q.addCriteria(Criteria.where("refType").is("BOOKING"));
+        q.addCriteria(Criteria.where("refId").is(bookingId));
+
+        Update u = new Update()
+                .set("state", SeatState.FREE.name())
+                .unset("refType")
+                .unset("refId")
+                .unset("expiresAt");
+
+        UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
+        return r.getModifiedCount();
     }
 }

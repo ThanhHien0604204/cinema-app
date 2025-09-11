@@ -1,6 +1,7 @@
 package com.ntth.spring_boot_heroku_cinema_app.pojo;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
@@ -14,6 +15,9 @@ import java.util.List;
         private String showtimeId;
         private List<String> seats;
         private long Amount;           // VND
+
+        // TTL: Mongo sẽ tự xoá document sau khi qua expiresAt
+        @Indexed(expireAfterSeconds = 0)
         private Instant expiresAt;     // TTL
 
         public String getId() {
