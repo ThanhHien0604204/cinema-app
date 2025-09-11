@@ -26,5 +26,6 @@ public class HoldController {
         Map<String,Object> res = holdService.createHold(user.getUserId(), showtimeId, seats);
         return ResponseEntity.status(HttpStatus.CREATED).body(res);
     }
+
 }
 
