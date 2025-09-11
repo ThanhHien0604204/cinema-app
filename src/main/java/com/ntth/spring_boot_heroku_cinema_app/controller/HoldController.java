@@ -47,6 +47,7 @@ public class HoldController {
         Map<String,Object> res = holdService.createHold(userId, showtimeId, seats);
         return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(res);
     }
+
     @GetMapping("/api/test_users/me")
     public Map<String,Object> me(@AuthenticationPrincipal JwtUser user,
                                  org.springframework.security.core.Authentication auth) {
