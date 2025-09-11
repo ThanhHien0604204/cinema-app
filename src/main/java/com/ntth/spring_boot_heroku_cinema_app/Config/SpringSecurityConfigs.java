@@ -100,8 +100,8 @@ public class SpringSecurityConfigs {
                 .authorizeHttpRequests(requests
                         -> requests
                         //toàn bộ các request đến /api/** được truy cập công khai (không cần đăng nhập)
-                        //.requestMatchers("/api/**").permitAll()
-                        .requestMatchers("/error").permitAll()
+//                        .requestMatchers("/api/**").permitAll()
+                                .requestMatchers("/error").permitAll()
                                 .requestMatchers("/api/payments/zalopay/ipn").permitAll()
                         // Public: login
                         .requestMatchers(HttpMethod.POST, "/api/login","/api/register").permitAll()

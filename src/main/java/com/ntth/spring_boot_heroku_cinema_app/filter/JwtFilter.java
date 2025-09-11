@@ -1,95 +1,107 @@
-
 package com.ntth.spring_boot_heroku_cinema_app.filter;
 
-import com.ntth.spring_boot_heroku_cinema_app.service.CustomUserDetailsService;
-import com.ntth.spring_boot_heroku_cinema_app.filter.JwtProvider;
+import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
+import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.lang.Nullable;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 
-import org.springframework.stereotype.Component;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
-import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.util.StringUtils;
-
-// Filter này chạy MỖI REQUEST (một lần) để:
-// 1) Đọc header Authorization
-// 2) Tách JWT
-// 3) Validate JWT
-// 4) Lấy email từ JWT → load UserDetails
-// 5) Gắn Authentication vào SecurityContext để downstream (controller) biết đã đăng nhập.
-//=>kiểm tra token mỗi lần gọi API
 @Component
 public class JwtFilter extends OncePerRequestFilter {
 
-    private final JwtProvider jwtProvider;
-    private final CustomUserDetailsService userDetailsService;
+    private static final Logger log = LoggerFactory.getLogger(JwtFilter.class);
 
-    // Dùng constructor injection cho rõ dependencies (khuyến nghị hiện nay).
-    public JwtFilter(JwtProvider jwtProvider, CustomUserDetailsService userDetailsService) {
+    private final JwtProvider jwtProvider;
+    // Optional: dùng để lấy userId & role từ DB (đúng với log của bạn: findByEmail)
+    private final @Nullable UserRepository userRepository;
+
+    public JwtFilter(JwtProvider jwtProvider,
+                     @Nullable UserRepository userRepository) {
         this.jwtProvider = jwtProvider;
-        this.userDetailsService = userDetailsService;
+        this.userRepository = userRepository;
     }
 
     @Override
-    protected void doFilterInternal(
-            HttpServletRequest request,
-            HttpServletResponse response,
-            FilterChain filterChain
-    ) throws ServletException, IOException {
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain)
+            throws ServletException, IOException {
 
-        // 1) Lấy header Authorization
-        String authHeader = request.getHeader("Authorization");
-        System.out.println("Authorization header: " + authHeader);
+        try {
+            String bearer = request.getHeader("Authorization");
+            if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
+                String token = bearer.substring(7);
 
-        String requestURI = request.getRequestURI();
-        // Bỏ qua xác thực cho /api/login
-        if ("/api/login".equals(requestURI)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-        // 2) Kiểm tra header có dạng "Bearer <token>" không
-        if (StringUtils.hasText(authHeader) && authHeader.startsWith("Bearer ")) {
-            // Cắt bỏ "Bearer " để lấy ra phần token thực sự
-            String token = authHeader.substring(7);
-            System.out.println("Extracted token: " + token);
-            // 3) Validate chữ ký + hạn token
-            if (jwtProvider.validateToken(token)) {
+                // 1) validate token
+                if (jwtProvider.validateToken(token)) {
 
-                // 4) Trích xuất email (subject) từ token
-                String email = jwtProvider.extractEmail(token);
+                    // 2) lấy email (subject)
+                    String email = jwtProvider.getEmailFromToken(token);
 
-                // Tránh set lại Authentication nếu context đã có (ví dụ filter chạy lần nữa)
-                if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                    // 3) nếu chưa có Authentication thì set
+                    Authentication existing = SecurityContextHolder.getContext().getAuthentication();
+                    if (existing == null) {
 
-                    // 5) Load UserDetails (lấy roles, password, username) từ DB theo email
-                    UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+                        // 3a) Lấy user từ DB (để có _id và role)
+                        String userId = email; // fallback
+                        String role = "USER";  // fallback
 
-                    // 6) Tạo Authentication chứa principal (userDetails) + authorities (ROLE_USER/ADMIN)
-                    UsernamePasswordAuthenticationToken authToken =
-                            new UsernamePasswordAuthenticationToken(
-                                    userDetails,
-                                    null,
-                                    userDetails.getAuthorities() // rất quan trọng để @PreAuthorize / hasRole hoạt động
-                            );
+                        if (userRepository != null) {
+                            Optional<User> u = userRepository.findByEmail(email);
+                            if (u.isPresent()) {
+                                userId = String.valueOf(u.get().getId());
+                                // field của bạn là "role" (String) -> ví dụ "USER"
+                                if (u.get().getRole() != null) {
+                                    role = u.get().getRole().toUpperCase(Locale.ROOT);
+                                }
+                            } else {
+                                log.debug("User not found by email={}, continue with email as userId", email);
+                            }
+                        }
 
-                    // Gắn thêm thông tin chi tiết từ request (IP, sessionId...) nếu cần
-                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        // 3b) principal kiểu JwtUser để @AuthenticationPrincipal dùng được
+                        JwtUser principal = new JwtUser(userId, /* username: */ email, email, role);
 
-                    // 7) Đặt Authentication vào SecurityContext → coi như "đã đăng nhập"
-                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                        // 3c) authorities từ role
+                        List<SimpleGrantedAuthority> authorities =
+                                List.of(new SimpleGrantedAuthority("ROLE_" + role));
+
+                        UsernamePasswordAuthenticationToken authToken =
+                                new UsernamePasswordAuthenticationToken(principal, null, authorities);
+                        authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                        SecurityContextHolder.getContext().setAuthentication(authToken);
+
+                        if (log.isDebugEnabled()) {
+                            log.debug("Authenticated request: email={}, userId={}, role={}", email, userId, role);
+                        }
+                    }
+                } else {
+                    log.debug("JWT invalid or expired");
                 }
             }
-            // (Tuỳ chọn) else: token hết hạn/sai signature → có thể trả 401 ở đây nếu muốn chặn sớm.
+        } catch (Exception e) {
+            // không chặn request, chỉ log cho dễ debug
+            log.error("JWT filter error: {}", e.getMessage(), e);
         }
 
-        // 8) Tiếp tục đẩy request xuống các filter/controller phía sau
         filterChain.doFilter(request, response);
     }
 }

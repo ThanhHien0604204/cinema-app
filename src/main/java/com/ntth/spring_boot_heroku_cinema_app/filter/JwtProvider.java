@@ -36,7 +36,15 @@ public class JwtProvider {//tạo & giải mã token
             return false;
         }
     }
+    /** Subject được set là email khi phát token */
     public String getEmailFromToken(String token) {
-        return Jwts.parser().setSigningKey(secretKey).parseClaimsJws(token).getBody().getSubject();
+        return Jwts.parser().setSigningKey(secretKey)
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
+    }
+    /** Giữ hàm alias cho code cũ */
+    public String getEmail(String token) {
+        return getEmailFromToken(token);
     }
 }
