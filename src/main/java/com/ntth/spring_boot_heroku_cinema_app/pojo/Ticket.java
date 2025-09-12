@@ -110,6 +110,7 @@ public class Ticket {
             private Instant paidAt;
             private String txId;
             private Map<String, Object> raw;
+            private String zpTransId;
 
         public String getGateway() {
             return gateway;
@@ -150,5 +151,9 @@ public class Ticket {
         public void setRaw(Map<String, Object> raw) {
             this.raw = raw;
         }
+
+        public String getZpTransId() { return zpTransId; }
+
+        public void setZpTransId(String zpTransId) { this.zpTransId = zpTransId; }
     }
 }

@@ -47,7 +47,7 @@ public class CinemaController {
         }
         return rooms;
     }
-    @PostMapping("/cinemas")
+    @PostMapping
     public ResponseEntity<Cinema> addCinema(@RequestBody Cinema cinema) {
         Cinema savedCinema = cinemaRepository.save(cinema);
         return ResponseEntity.ok(savedCinema);

@@ -281,21 +281,35 @@ public class TicketService {
         }
 
         // 4. Lấy mã giao dịch ZaloPay (zp_trans_id) từ thông tin thanh toán của vé
-        String zpTransId = b.getPayment().getTxId();
-        if (zpTransId == null || zpTransId.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "MISSING_ZP_TRANS_ID: " + bookingId);
+//        String zpTransId = b.getPayment().getTxId();
+//        if (zpTransId == null || zpTransId.isEmpty()) {
+//            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+//                    "MISSING_ZP_TRANS_ID: " + bookingId);
+//        }
+        String zpTransId = null;
+        try {
+            Ticket.PaymentInfo p = b.getPayment();
+            if (p != null) zpTransId = p.getZpTransId(); // field này cần có trong PaymentInfo
+        } catch (Throwable ignore) {}
+
+        // Nếu vẫn null thì không thể refund (chưa có IPN/không lưu zp_trans_id)
+        if (zpTransId == null || zpTransId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ZP_TRANS_ID_MISSING");
         }
+
         // 4.5. Vệ sinh lý do hủy
         String refundReason = (reason == null || reason.trim().isEmpty()) ? "refund" : reason.trim();
         if (refundReason.length() > 255) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_REFUND_REASON");
         }
 
-        // 5. Gọi API hoàn tiền (refund) của ZaloPay
-        // Sử dụng appId, key1 từ cấu hình ZaloPay, cùng với mã giao dịch, số tiền và lý do hủy
-        Map<String, Object> ret = zalo.refund(zalo.getAppId(), zalo.getKey1(), zpTransId, b.getAmount(),
-                reason == null ? "refund" : reason);
+        // 5. Gọi API hoàn tiền (refund) - chữ ký mới: refund(zpTransId, amount, description)
+        Map<String, Object> ret = zalo.refund(
+                zpTransId,
+                b.getAmount(),
+                (reason == null || reason.isBlank()) ? "refund" : reason
+        );
+
 
         // 6. Kiểm tra mã trả về từ API refund, nếu không phải 1 (thành công) thì ném lỗi
         log.info("Processing refund for bookingId: {}, zpTransId: {}", bookingId, zpTransId);
