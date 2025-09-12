@@ -288,20 +288,15 @@ public class TicketService {
     public Ticket cancelBooking(String bookingId, String reason) {
         Logger log = LoggerFactory.getLogger(getClass());
 
-        // 1) Tải booking
         Ticket b = ticketRepo.findById(bookingId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        // 2) Chỉ cho hủy khi đã xác nhận (nếu muốn cho cả pending thì mở comment bên dưới)
         if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
-            // if ("PENDING_PAYMENT".equalsIgnoreCase(b.getStatus())) { /* cho hủy pending nếu muốn */ }
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ONLY_CONFIRMED_CAN_BE_CANCELED");
         }
 
-        // 3) Chuẩn bị lý do
-        final String cancelReason = (reason == null || reason.isBlank()) ? "cancel" : reason.trim();
+        String cancelReason = (reason == null || reason.isBlank()) ? "cancel" : reason.trim();
 
-        // 4) Nếu là ZaloPay: hoàn tiền
         String gateway = null;
         try { gateway = (b.getPayment() != null ? b.getPayment().getGateway() : null); } catch (Throwable ignore) {}
 
@@ -313,56 +308,41 @@ public class TicketService {
             }
 
             if (zpTransId == null || zpTransId.isBlank()) {
-                // DEV-friendly: thiếu transaction id thì bỏ qua refund nhưng vẫn hủy vé
-                // Nếu muốn nghiêm ngặt, đổi sang:
-                // throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ZP_TRANS_ID_MISSING");
-                log.warn("Cancel booking {}: missing ZaloPay transaction id, skip refund.", bookingId);
+                // Thiếu transaction id -> DEV: skip refund
+                // Nếu cần chặt chẽ thì throw 400 "ZP_TRANS_ID_MISSING"
+            } else if (zpTransId.startsWith("TEST_")) {
+                // >>> PATCH DEV: bỏ qua refund thật nếu là mã giả lập
+                log.warn("Mock cancel: skip real ZaloPay refund for test id {}", zpTransId);
             } else {
-                // ---- Chữ ký MỚI (khuyến nghị) ----
+                // Gọi refund thật (chữ ký MỚI)
                 Map<String, Object> ret = zalo.refund(zpTransId, b.getAmount(), cancelReason);
 
-                // ---- Nếu bạn còn dùng chữ ký CŨ, dùng dòng dưới thay cho dòng trên: ----
+                // Nếu dự án của bạn vẫn dùng chữ ký CŨ, thay dòng trên bằng:
                 // Map<String, Object> ret = zalo.refund(zalo.getAppId(), zalo.getKey1(), zpTransId, b.getAmount(), cancelReason);
 
                 Object rcObj = (ret != null ? ret.get("return_code") : null);
                 int rc;
-                try {
-                    rc = (rcObj instanceof Number) ? ((Number) rcObj).intValue() : Integer.parseInt(String.valueOf(rcObj));
-                } catch (Exception e) {
-                    rc = -999;
-                }
+                try { rc = (rcObj instanceof Number) ? ((Number) rcObj).intValue() : Integer.parseInt(String.valueOf(rcObj)); }
+                catch (Exception e) { rc = -999; }
+
                 if (rc != 1) {
+                    log.error("ZaloPay refund failed: rc={}, resp={}", rc, ret);
                     throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ZALO_REFUND_FAILED");
                 }
-
-                // lưu raw response nếu model có
-                try {
-                    Ticket.PaymentInfo p = b.getPayment();
-                    if (p != null) p.setRaw(ret);
-                } catch (Throwable ignore) {}
             }
         }
 
-        // 5) Trả ghế về FREE (nếu đang CONFIRMED)
+        // Free seats (CONFIRMED -> FREE)
         try {
-            long freed = ledgerRepo.freeMany(b.getShowtimeId(), b.getSeats(), b.getId());
-            if (freed != (b.getSeats() != null ? b.getSeats().size() : 0)) {
-                log.warn("freeMany freed {} / {} seats for booking {}", freed,
-                        (b.getSeats() == null ? 0 : b.getSeats().size()), b.getId());
-            }
+            ledgerRepo.freeMany(b.getShowtimeId(), b.getSeats(), b.getId());
         } catch (Throwable e) {
-            // Nếu vì lý do gì đó free ghế lỗi, vẫn hủy vé nhưng log warning
             log.warn("freeMany failed for booking {}: {}", b.getId(), e.toString());
         }
 
-        // 6) Cập nhật trạng thái vé
         b.setStatus("CANCELED");
         ticketRepo.save(b);
-
-        log.info("Canceled bookingId={} (gateway={}, reason='{}')", bookingId, gateway, cancelReason);
         return b;
     }
-
 
 
     /**
