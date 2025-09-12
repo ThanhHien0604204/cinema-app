@@ -187,6 +187,18 @@ public class TicketService {
             p.setTxId(String.valueOf(parsed.get("zp_trans_id"))); // Lưu mã giao dịch ZaloPay
             p.setRaw(parsed); // Lưu toàn bộ dữ liệu thô từ ZaloPay
 
+            Object zptObj = parsed.get("zp_trans_id");
+            if (zptObj != null) {
+                Ticket.PaymentInfo pay = b.getPayment();
+                if (pay == null) {
+                    pay = new Ticket.PaymentInfo();
+                    pay.setGateway("ZALOPAY");
+                }
+                try { pay.setTxId(String.valueOf(zptObj)); } catch (Throwable ignore) {}
+                try { pay.setZpTransId(String.valueOf(zptObj)); } catch (Throwable ignore) {}
+                b.setPayment(pay);
+            }
+
             // Lưu vé đã cập nhật vào cơ sở dữ liệu
             ticketRepo.save(b);
 
@@ -201,6 +213,12 @@ public class TicketService {
             if (updated != b.getSeats().size()) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
             }
+
+            // 16.1. Xoá SeatLock sau khi xác nhận thành công (tránh lock còn treo)
+            try {
+                lockRepo.deleteById(b.getHoldId());
+            } catch (Throwable ignore) {}
+
         } else {
             // 17. Trường hợp thanh toán thất bại (status != 1)
             // cập nhật trạng thái vé thành CANCELED
@@ -269,70 +287,83 @@ public class TicketService {
     @Transactional
     public Ticket cancelBooking(String bookingId, String reason) {
         Logger log = LoggerFactory.getLogger(getClass());
-        // 1. Tìm vé trong cơ sở dữ liệu dựa trên bookingId
+
+        // 1) Tải booking
         Ticket b = ticketRepo.findById(bookingId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        // 2. Kiểm tra trạng thái vé, chỉ cho phép hủy nếu vé đang ở trạng thái CONFIRMED
-        if (!"CONFIRMED".equals(b.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ONLY_CONFIRMED_CAN_BE_REFUNDED");
+        // 2) Chỉ cho hủy khi đã xác nhận (nếu muốn cho cả pending thì mở comment bên dưới)
+        if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
+            // if ("PENDING_PAYMENT".equalsIgnoreCase(b.getStatus())) { /* cho hủy pending nếu muốn */ }
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ONLY_CONFIRMED_CAN_BE_CANCELED");
         }
 
-        // 3. Kiểm tra xem vé có sử dụng cổng thanh toán ZaloPay hay không
-        // Nếu không phải ZaloPay, ném lỗi BAD_REQUEST
-        if (b.getPayment() == null ||!"ZALOPAY".equalsIgnoreCase(b.getPayment().getGateway())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "NOT_ZALOPAY_BOOKING");
+        // 3) Chuẩn bị lý do
+        final String cancelReason = (reason == null || reason.isBlank()) ? "cancel" : reason.trim();
+
+        // 4) Nếu là ZaloPay: hoàn tiền
+        String gateway = null;
+        try { gateway = (b.getPayment() != null ? b.getPayment().getGateway() : null); } catch (Throwable ignore) {}
+
+        if ("ZALOPAY".equalsIgnoreCase(gateway)) {
+            String zpTransId = null;
+            try { zpTransId = b.getPayment().getZpTransId(); } catch (Throwable ignore) {}
+            if (zpTransId == null || zpTransId.isBlank()) {
+                try { zpTransId = b.getPayment().getTxId(); } catch (Throwable ignore) {}
+            }
+
+            if (zpTransId == null || zpTransId.isBlank()) {
+                // DEV-friendly: thiếu transaction id thì bỏ qua refund nhưng vẫn hủy vé
+                // Nếu muốn nghiêm ngặt, đổi sang:
+                // throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ZP_TRANS_ID_MISSING");
+                log.warn("Cancel booking {}: missing ZaloPay transaction id, skip refund.", bookingId);
+            } else {
+                // ---- Chữ ký MỚI (khuyến nghị) ----
+                Map<String, Object> ret = zalo.refund(zpTransId, b.getAmount(), cancelReason);
+
+                // ---- Nếu bạn còn dùng chữ ký CŨ, dùng dòng dưới thay cho dòng trên: ----
+                // Map<String, Object> ret = zalo.refund(zalo.getAppId(), zalo.getKey1(), zpTransId, b.getAmount(), cancelReason);
+
+                Object rcObj = (ret != null ? ret.get("return_code") : null);
+                int rc;
+                try {
+                    rc = (rcObj instanceof Number) ? ((Number) rcObj).intValue() : Integer.parseInt(String.valueOf(rcObj));
+                } catch (Exception e) {
+                    rc = -999;
+                }
+                if (rc != 1) {
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ZALO_REFUND_FAILED");
+                }
+
+                // lưu raw response nếu model có
+                try {
+                    Ticket.PaymentInfo p = b.getPayment();
+                    if (p != null) p.setRaw(ret);
+                } catch (Throwable ignore) {}
+            }
         }
 
-        // 4. Lấy mã giao dịch ZaloPay (zp_trans_id) từ thông tin thanh toán của vé
-//        String zpTransId = b.getPayment().getTxId();
-//        if (zpTransId == null || zpTransId.isEmpty()) {
-//            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-//                    "MISSING_ZP_TRANS_ID: " + bookingId);
-//        }
-        String zpTransId = null;
+        // 5) Trả ghế về FREE (nếu đang CONFIRMED)
         try {
-            Ticket.PaymentInfo p = b.getPayment();
-            if (p != null) zpTransId = p.getZpTransId(); // field này cần có trong PaymentInfo
-        } catch (Throwable ignore) {}
-
-        // Nếu vẫn null thì không thể refund (chưa có IPN/không lưu zp_trans_id)
-        if (zpTransId == null || zpTransId.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ZP_TRANS_ID_MISSING");
+            long freed = ledgerRepo.freeMany(b.getShowtimeId(), b.getSeats(), b.getId());
+            if (freed != (b.getSeats() != null ? b.getSeats().size() : 0)) {
+                log.warn("freeMany freed {} / {} seats for booking {}", freed,
+                        (b.getSeats() == null ? 0 : b.getSeats().size()), b.getId());
+            }
+        } catch (Throwable e) {
+            // Nếu vì lý do gì đó free ghế lỗi, vẫn hủy vé nhưng log warning
+            log.warn("freeMany failed for booking {}: {}", b.getId(), e.toString());
         }
 
-        // 4.5. Vệ sinh lý do hủy
-        String refundReason = (reason == null || reason.trim().isEmpty()) ? "refund" : reason.trim();
-        if (refundReason.length() > 255) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_REFUND_REASON");
-        }
-
-        // 5. Gọi API hoàn tiền (refund) - chữ ký mới: refund(zpTransId, amount, description)
-        Map<String, Object> ret = zalo.refund(
-                zpTransId,
-                b.getAmount(),
-                (reason == null || reason.isBlank()) ? "refund" : reason
-        );
-
-
-        // 6. Kiểm tra mã trả về từ API refund, nếu không phải 1 (thành công) thì ném lỗi
-        log.info("Processing refund for bookingId: {}, zpTransId: {}", bookingId, zpTransId);
-        int rc = ((Number) ret.getOrDefault("return_code", -1)).intValue();
-        if (rc != 1) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ZALO_REFUND_FAILED: " + ret);
-        }
-
-        // 7. Cập nhật trạng thái vé thành REFUNDED
-        b.setStatus("REFUNDED");
+        // 6) Cập nhật trạng thái vé
+        b.setStatus("CANCELED");
         ticketRepo.save(b);
-        log.info("Refund successful, updated bookingId: {} to REFUNDED", bookingId);
 
-        // 8. Trả ghế về trạng thái FREE (ngay lập tức)
-        long freed = ledgerRepo.freeMany(b.getShowtimeId(), b.getSeats(), b.getId());
-
-        // 9. Trả về đối tượng vé đã được cập nhật
+        log.info("Canceled bookingId={} (gateway={}, reason='{}')", bookingId, gateway, cancelReason);
         return b;
     }
+
+
 
     /**
      * Tạo mã ngẫu nhiên theo định dạng UIN-XXXXXX
