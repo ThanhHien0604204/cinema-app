@@ -190,6 +190,10 @@ public class TicketService {
             // Lưu vé đã cập nhật vào cơ sở dữ liệu
             ticketRepo.save(b);
 
+            Logger log = LoggerFactory.getLogger(getClass());
+            log.debug("IPN confirm: bookingId={}, holdId={}, showtimeId={}, seats={}",
+                    b.getId(), b.getHoldId(), b.getShowtimeId(), b.getSeats());
+
             // 15. Cập nhật ledger (sổ cái) để xác nhận ghế ngồi cho suất chiếu
             long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
 

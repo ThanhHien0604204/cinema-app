@@ -30,9 +30,9 @@ public class HoldService {
         }
         seats = seats.stream().filter(Objects::nonNull).map(s -> s.trim().toUpperCase()).toList();
 
-        // TTL mặc định 5 phút
+        // TTL mặc định 20 phút
         Instant now = Instant.now();
-        Instant expiresAt = now.plus(Duration.ofMinutes(5));
+        Instant expiresAt = now.plus(Duration.ofMinutes(20));
 
         // 1) Tính tiền (tuỳ bạn lấy từ showtime/room)
         long amount = computeAmount(showtimeId, seats);

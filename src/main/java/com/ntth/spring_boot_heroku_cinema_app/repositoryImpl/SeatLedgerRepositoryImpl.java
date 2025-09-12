@@ -120,23 +120,23 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
     /** Giữ nguyên API tiện dụng đã khai báo trong interface */
     @Override
     public long confirmMany(String showtimeId, List<String> seats, String bookingId, String holdId) {
-        Query q = new Query();
-        q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
-        q.addCriteria(Criteria.where("seat").in(seats));
-        q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
-        q.addCriteria(Criteria.where("refType").is("LOCK"));
-        q.addCriteria(Criteria.where("refId").is(holdId));
-        q.addCriteria(Criteria.where("expiresAt").gt(Instant.now()));
-
+        Query q = new Query(new Criteria().andOperator(
+                Criteria.where("showtimeId").is(showtimeId),
+                Criteria.where("seat").in(seats),
+                Criteria.where("state").is("HOLD"),
+                Criteria.where("refType").is("LOCK"),
+                Criteria.where("refId").is(holdId)
+                // ❌ KHÔNG ràng buộc expiresAt > now ở đây
+        ));
         Update u = new Update()
-                .set("state", SeatState.CONFIRMED.name())
+                .set("state", "CONFIRMED")
                 .set("refType", "BOOKING")
                 .set("refId", bookingId)
                 .unset("expiresAt");
-
-        UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
+        var r = mongo.updateMulti(q, u, SeatLedger.class);
         return r.getModifiedCount();
     }
+
 
     @Override
     public long freeMany(String showtimeId, List<String> seats, String bookingId) {
