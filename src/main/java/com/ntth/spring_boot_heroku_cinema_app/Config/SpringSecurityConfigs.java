@@ -100,7 +100,9 @@ public class SpringSecurityConfigs {
                         .requestMatchers(HttpMethod.GET,
                                 "/api/movies/**",
                                 "/api/genres/**",
-                                "/api/users/**"             // GET /api/users/{id} và GET /api/users?ids=...
+                                "/api/users/**",// GET /api/users/{id} và GET /api/users?ids=...
+                                "/api/showtimes/**",
+                                "/api/cinemas/**"
                         ).permitAll()
 
                         // Public: list & summary review theo movie
@@ -117,7 +119,7 @@ public class SpringSecurityConfigs {
                         // Cần đăng nhập: chỉnh sửa hồ sơ & đổi mật khẩu
                         .requestMatchers(HttpMethod.PUT,   "/api/users/me").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/users/me/password").authenticated()
-                                .requestMatchers("/api/showtimes/**",
+                                .requestMatchers("/api/showtimes/{id}",
                                         "/api/bookings/**",
                                         "/api/payments/zalopay/create",
                                         "/api/bookings/zalopay").authenticated()

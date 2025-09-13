@@ -47,37 +47,33 @@ public class TicketController {
      */
     @GetMapping("/{id}")
     public Map<String, Object> getOne(@PathVariable String id, JwtUser user) {
+        // 1) Tải booking ĐÚNG cách (Spring Data map _id)
         Ticket b = ticketRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        // Chỉ cho chủ vé xem (hoặc bạn mở rộng cho ADMIN tuỳ nhu cầu)
+        // 2) Chặn xem chéo nếu không phải chủ vé (cho ADMIN thì bỏ qua – nếu JwtUser có role)
         if (user == null || (b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId()))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
         }
 
-        // Trả JSON gọn đúng những gì app cần để poll & hiển thị
+        // 3) Trả JSON gọn để app poll
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("id", b.getId());
-        res.put("bookingId", b.getId());             // để client map an toàn
+        res.put("bookingId", b.getId());
         res.put("bookingCode", b.getBookingCode());
-        res.put("status", b.getStatus());            // PENDING_PAYMENT | CONFIRMED | CANCELED ...
+        res.put("status", b.getStatus());
         res.put("showtimeId", b.getShowtimeId());
         res.put("amount", b.getAmount());
         res.put("seats", b.getSeats());
-
-        // trả gateway nếu có
         try {
             Map<String, Object> pay = new LinkedHashMap<>();
             if (b.getPayment() != null && b.getPayment().getGateway() != null) {
                 pay.put("gateway", b.getPayment().getGateway());
             }
             res.put("payment", pay);
-        } catch (Throwable ignore) {
-        }
-
+        } catch (Throwable ignore) {}
         return res;
     }
-
     /**
      * (Tuỳ chọn) Lấy booking theo mã code để CSKH tra cứu nhanh
      */
