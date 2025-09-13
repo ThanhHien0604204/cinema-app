@@ -1,12 +1,5 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package com.ntth.spring_boot_heroku_cinema_app.Config;
 
-import com.cloudinary.Cloudinary;
-import com.cloudinary.utils.ObjectUtils;
-//import com.ntth.filter.JwtFilter;
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtFilter;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Review;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,7 +7,6 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.MongoDatabaseFactory;
@@ -26,7 +18,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -40,9 +31,6 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.web.multipart.MultipartResolver;
-import org.springframework.web.multipart.support.StandardServletMultipartResolver;
-import org.springframework.web.servlet.handler.HandlerMappingIntrospector;
 
 import java.util.List;
 
@@ -55,6 +43,7 @@ import java.util.List;
 @ComponentScan(basePackages = {
         "com.ntth.spring_boot_heroku_cinema_app.controller",
         "com.ntth.spring_boot_heroku_cinema_app.repositorie",
+        "com.ntth.spring_boot_heroku_cinema_app.repositoryImpl",
         "com.ntth.spring_boot_heroku_cinema_app.service",
         "com.ntth.spring_boot_heroku_cinema_app.filter"
 })
@@ -72,6 +61,7 @@ public class SpringSecurityConfigs {
 
     @Autowired
     private Environment environment;
+
 
     //Tạo bean để Spring quản lý
     @Bean

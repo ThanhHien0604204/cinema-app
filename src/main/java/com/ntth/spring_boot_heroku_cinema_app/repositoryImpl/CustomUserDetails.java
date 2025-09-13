@@ -23,7 +23,7 @@ public class CustomUserDetails implements UserDetails {
     // Lưu ý: Spring Security chuẩn dùng tiền tố "ROLE_".
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // Ví dụ DB lưu "USER" hoặc "ADMIN" → ta thêm tiền tố ROLE_ khi cấp quyền.
+        // Ví dụ DB lưu "USER" hoặc "ADMIN" → ta thêm tiền tố ROLE_ khi cấp quyền. (ví dụ: ROLE_USER)
         return List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole()));
     }
 

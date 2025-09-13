@@ -62,22 +62,20 @@ public class JwtFilter extends OncePerRequestFilter {
                         // 3a) Lấy user từ DB (để có _id và role)
                         String userId = email; // fallback
                         String role = "USER";  // fallback
+                        String password = "";  // fallback
 
                         if (userRepository != null) {
                             Optional<User> u = userRepository.findByEmail(email);
                             if (u.isPresent()) {
                                 userId = String.valueOf(u.get().getId());
-                                // field của bạn là "role" (String) -> ví dụ "USER"
-                                if (u.get().getRole() != null) {
-                                    role = u.get().getRole().toUpperCase(Locale.ROOT);
-                                }
+                                role = u.get().getRole().toUpperCase(Locale.ROOT);
+                                password = u.get().getPassword();  // ← THÊM: Lấy password (mã hóa)
                             } else {
-                                log.debug("User not found by email={}, continue with email as userId", email);
+                                log.debug("Không tìm thấy người dùng qua email={}, tiếp tục với phương án dự phòng", email);
                             }
                         }
-
                         // 3b) principal kiểu JwtUser để @AuthenticationPrincipal dùng được
-                        JwtUser principal = new JwtUser(userId, /* username: */ email, email, role);
+                        JwtUser principal = new JwtUser(userId, email, email, role, password);
 
                         // 3c) authorities từ role
                         List<SimpleGrantedAuthority> authorities =
@@ -90,16 +88,16 @@ public class JwtFilter extends OncePerRequestFilter {
                         SecurityContextHolder.getContext().setAuthentication(authToken);
 
                         if (log.isDebugEnabled()) {
-                            log.debug("Authenticated request: email={}, userId={}, role={}", email, userId, role);
+                            log.debug("Yêu cầu đã xác thực: email={}, userId={}, role={}", email, userId, role);
                         }
                     }
                 } else {
-                    log.debug("JWT invalid or expired");
+                    log.debug("JWT không hợp lệ hoặc đã hết hạn");
                 }
             }
         } catch (Exception e) {
             // không chặn request, chỉ log cho dễ debug
-            log.error("JWT filter error: {}", e.getMessage(), e);
+            log.error("Lỗi bộ lọc JWT: {}", e.getMessage(), e);
         }
 
         filterChain.doFilter(request, response);

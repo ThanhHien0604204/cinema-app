@@ -3,6 +3,7 @@ package com.ntth.spring_boot_heroku_cinema_app.controller;
 import com.ntth.spring_boot_heroku_cinema_app.dto.MovieRatingSummary;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ReviewRequest;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ReviewResponse;
+import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Review;
 import com.ntth.spring_boot_heroku_cinema_app.repository.ReviewRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
@@ -11,9 +12,11 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.repository.Aggregation;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -30,6 +33,25 @@ public class ReviewController {
     @Autowired
     private ReviewRepository reviewRepo;
 
+    // Lấy review của CHÍNH TÔI - PHÂN TRANG
+    @GetMapping("/me")
+    public ResponseEntity<Page<ReviewResponse>> myReviews(
+            @AuthenticationPrincipal JwtUser me,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        if (me == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        String userId = me.getUserId(); // Lấy userId từ JwtUser
+        Page<Review> p = reviewRepo.findByUserIdOrderByReviewTimeDesc(
+                userId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "reviewTime")));
+
+        Page<ReviewResponse> responsePage = p.map(ReviewResponse::of);
+        return ResponseEntity.ok(responsePage);
+    }
+
     // Upsert review của CHÍNH TÔI cho 1 movie
     @PostMapping
     public ReviewResponse upsert(@Valid @RequestBody ReviewRequest req,
@@ -41,16 +63,6 @@ public class ReviewController {
                 req.rating(),                      // <-- record accessor
                 req.content()                      // <-- record accessor
         );
-    }
-
-    // 2) Lấy review của CHÍNH TÔI - PHÂN TRANG
-    @GetMapping("/me")
-    public Page<ReviewResponse> myReviews(@AuthenticationPrincipal CustomUserDetails me,
-                                          @RequestParam(defaultValue = "0") int page,
-                                          @RequestParam(defaultValue = "10") int size) {
-        String userId = me.getUser().getId(); // lấy từ JWT
-        Page<Review> p = reviewRepo.findByUserIdOrderByReviewTimeDesc(userId, PageRequest.of(page, size));
-        return p.map(ReviewResponse::of);
     }
 
     // Lấy review của CHÍNH TÔI cho 1 movie
