@@ -43,15 +43,18 @@ public class TicketController {
     }
 
     /**
-     * Lấy trạng thái 1 booking để app poll (Android gọi)
+     * Lấy trạng thái 1 booking để app poll
      */
-    @GetMapping("/{id}")
-    public Map<String, Object> getOne(@PathVariable String id, JwtUser user) {
+    @GetMapping("/api/bookings/{id}")
+    public Map<String, Object> getOne(@PathVariable String id,
+                                      @AuthenticationPrincipal JwtUser user) {
+        // Dùng Repository để Spring Data map _id (ObjectId) từ String giúp bạn
         Ticket b = ticketRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        // Chặn xem chéo: chỉ chủ vé (nếu muốn cho ADMIN thì nới lỏng chỗ này)
-        if (user == null || (b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId()))) {
+        // Chặn xem chéo: chỉ chủ vé (nếu muốn cho ADMIN thì nới lỏng tại đây)
+        boolean isAdmin = user != null && "ADMIN".equalsIgnoreCase(user.getRole());
+        if (!isAdmin && b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
         }
 
@@ -59,17 +62,23 @@ public class TicketController {
         res.put("id", b.getId());
         res.put("bookingId", b.getId());
         res.put("bookingCode", b.getBookingCode());
-        res.put("status", b.getStatus());
+        res.put("status", b.getStatus());         // PENDING_PAYMENT | CONFIRMED | CANCELED ...
         res.put("showtimeId", b.getShowtimeId());
         res.put("amount", b.getAmount());
         res.put("seats", b.getSeats());
+
         try {
-            Map<String,Object> pay = new LinkedHashMap<>();
-            if (b.getPayment()!=null && b.getPayment().getGateway()!=null) pay.put("gateway", b.getPayment().getGateway());
+            Map<String, Object> pay = new LinkedHashMap<>();
+            if (b.getPayment() != null && b.getPayment().getGateway() != null) {
+                pay.put("gateway", b.getPayment().getGateway());
+            }
             res.put("payment", pay);
-        } catch (Throwable ignore) {}
+        } catch (Throwable ignore) {
+        }
+
         return res;
     }
+
     /**
      * (Tuỳ chọn) Lấy booking theo mã code để CSKH tra cứu nhanh
      */
