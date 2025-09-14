@@ -45,14 +45,14 @@ public class TicketController {
     /**
      * Lấy trạng thái 1 booking để app poll
      */
-    @GetMapping("/api/bookings/{id}")
+    @GetMapping("/{id}")
     public Map<String, Object> getOne(@PathVariable String id,
                                       @AuthenticationPrincipal JwtUser user) {
-        // Dùng Repository để Spring Data map _id (ObjectId) từ String giúp bạn
+        // Dùng Repository – Spring Data tự map _id (ObjectId) từ String
         Ticket b = ticketRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        // Chặn xem chéo: chỉ chủ vé (nếu muốn cho ADMIN thì nới lỏng tại đây)
+        // Chỉ cho chủ vé (nếu bạn có role ADMIN thì nới lỏng ở đây)
         boolean isAdmin = user != null && "ADMIN".equalsIgnoreCase(user.getRole());
         if (!isAdmin && b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
@@ -62,32 +62,29 @@ public class TicketController {
         res.put("id", b.getId());
         res.put("bookingId", b.getId());
         res.put("bookingCode", b.getBookingCode());
-        res.put("status", b.getStatus());         // PENDING_PAYMENT | CONFIRMED | CANCELED ...
+        res.put("status", b.getStatus());
         res.put("showtimeId", b.getShowtimeId());
-        res.put("amount", b.getAmount());
+        try { res.put("amount", b.getAmount()); } catch (Throwable ignore) {}
         res.put("seats", b.getSeats());
-
         try {
             Map<String, Object> pay = new LinkedHashMap<>();
             if (b.getPayment() != null && b.getPayment().getGateway() != null) {
                 pay.put("gateway", b.getPayment().getGateway());
             }
             res.put("payment", pay);
-        } catch (Throwable ignore) {
-        }
-
+        } catch (Throwable ignore) {}
         return res;
     }
 
-    /**
-     * (Tuỳ chọn) Lấy booking theo mã code để CSKH tra cứu nhanh
-     */
+    // (tuỳ chọn) lấy theo bookingCode – tiện cho CSKH
     @GetMapping("/code/{code}")
-    public Map<String, Object> getByCode(@PathVariable String code, JwtUser user) {
+    public Map<String, Object> getByCode(@PathVariable String code,
+                                         @AuthenticationPrincipal JwtUser user) {
         Ticket b = ticketRepo.findByBookingCode(code)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        if (user == null || (b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId()))) {
+        boolean isAdmin = user != null && "ADMIN".equalsIgnoreCase(user.getRole());
+        if (!isAdmin && b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
         }
 
@@ -97,7 +94,7 @@ public class TicketController {
         res.put("bookingCode", b.getBookingCode());
         res.put("status", b.getStatus());
         res.put("showtimeId", b.getShowtimeId());
-        res.put("amount", b.getAmount());
+        try { res.put("amount", b.getAmount()); } catch (Throwable ignore) {}
         res.put("seats", b.getSeats());
         return res;
     }
