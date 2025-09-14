@@ -80,4 +80,5 @@ public class SeatController {
         // Trim nếu vượt (rare case)
         return seats.subList(0, Math.min(seats.size(), totalSeats));
     }
+
 }
