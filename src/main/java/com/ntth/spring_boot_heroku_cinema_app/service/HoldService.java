@@ -24,7 +24,6 @@ public class HoldService {
     }
     // TTL giữ ghế (DEV có thể để 20 phút). Điều chỉnh theo nhu cầu.
     private static final long HOLD_TTL_MINUTES = 20L;
-
     /**
      * Giữ ghế:
      *  - Tạo SeatLock (userId, showtimeId, seats, amount, expiresAt)
