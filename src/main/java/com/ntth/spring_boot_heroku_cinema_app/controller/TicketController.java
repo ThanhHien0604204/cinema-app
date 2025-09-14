@@ -5,8 +5,12 @@ import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
 import com.ntth.spring_boot_heroku_cinema_app.repository.TicketRepository;
 import com.ntth.spring_boot_heroku_cinema_app.service.TicketService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -74,6 +78,19 @@ public class TicketController {
             res.put("payment", pay);
         } catch (Throwable ignore) {}
         return res;
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<Page<Ticket>> getMyTickets(
+            Authentication auth,  // Lấy userId từ JwtUser
+            @RequestParam(defaultValue = "CONFIRMED") String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        String userId = ((JwtUser) auth.getPrincipal()).getUserId();  // Từ JwtFilter
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Ticket> tickets = ticketRepo.findByUserIdAndStatus(userId, status, pageable);
+        return ResponseEntity.ok(tickets);  // Trả Page<Ticket> với nested PaymentInfo
     }
 
     // (tuỳ chọn) lấy theo bookingCode – tiện cho CSKH

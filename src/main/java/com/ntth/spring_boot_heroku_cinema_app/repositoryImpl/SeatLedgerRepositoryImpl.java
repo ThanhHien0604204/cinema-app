@@ -1,9 +1,11 @@
 package com.ntth.spring_boot_heroku_cinema_app.repositoryImpl;
 
+import com.mongodb.bulk.BulkWriteResult;
 import com.mongodb.client.result.UpdateResult;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.SeatLedger;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.SeatState;
 import com.ntth.spring_boot_heroku_cinema_app.repository.SeatLedgerRepositoryCustom;
+import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -156,5 +158,45 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
 
         UpdateResult r = mongo.updateMulti(q, u, SeatLedger.class);
         return r.getModifiedCount();
+    }
+    @Override
+    public long lockFromFree(String showtimeId, List<String> seats, String holdId, Instant expiresAt) {
+        Instant now = Instant.now();
+        BulkOperations ops = mongo.bulkOps(BulkOperations.BulkMode.UNORDERED, SeatLedger.class);
+
+        for (String seat : seats) {
+            // Cho phép lấy ghế nếu đang FREE, hoặc chưa có doc,
+            // hoặc đang HOLD nhưng đã hết hạn.
+            Criteria canLock = new Criteria().orOperator(
+                    Criteria.where("state").is(SeatState.FREE),
+                    Criteria.where("state").exists(false),
+                    new Criteria().andOperator(
+                            Criteria.where("state").is(SeatState.HOLD),
+                            new Criteria().orOperator(
+                                    Criteria.where("expiresAt").lt(now),
+                                    Criteria.where("expiresAt").is(null)
+                            )
+                    )
+            );
+
+            Query q = new Query(new Criteria().andOperator(
+                    Criteria.where("showtimeId").is(showtimeId),
+                    Criteria.where("seat").is(seat),
+                    canLock
+            ));
+
+            Update u = new Update()
+                    .set("showtimeId", showtimeId)
+                    .set("seat", seat)
+                    .set("state", SeatState.HOLD)
+                    .set("refType", "LOCK")
+                    .set("refId", holdId)
+                    .set("expiresAt", expiresAt);
+
+            ops.upsert(q, u); // <- quan trọng: tạo doc nếu chưa có
+        }
+
+        BulkWriteResult r = ops.execute();
+        return r.getModifiedCount() + r.getUpserts().size();
     }
 }

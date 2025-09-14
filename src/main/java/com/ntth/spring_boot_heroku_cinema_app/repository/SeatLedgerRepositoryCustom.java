@@ -24,4 +24,6 @@ public interface SeatLedgerRepositoryCustom {
     long confirmMany(String showtimeId, List<String> seats, String bookingId, String holdId);
     /** Trả ghế về FREE cho 1 booking (idempotent-safe) */
     long freeMany(String showtimeId, List<String> seats, String bookingId);
+
+    long lockFromFree(String showtimeId, List<String> seats, String holdId, Instant expiresAt);
 }
