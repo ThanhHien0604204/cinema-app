@@ -21,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Optional;
 
@@ -55,13 +56,16 @@ public class ReviewController {
     // Upsert review của CHÍNH TÔI cho 1 movie
     @PostMapping
     public ReviewResponse upsert(@Valid @RequestBody ReviewRequest req,
-                                 @AuthenticationPrincipal CustomUserDetails me) {
-        String userId = me.getUser().getId();      // <--- lấy từ JWT
+                                 @AuthenticationPrincipal JwtUser me) {
+        if (me == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED");
+        }
+        String userId = me.getUserId(); // lấy từ JwtUser
         return reviewService.upsert(
-                req.movieId(),                     // <-- record accessor
+                req.movieId(),
                 userId,
-                req.rating(),                      // <-- record accessor
-                req.content()                      // <-- record accessor
+                req.rating(),
+                req.content()
         );
     }
 

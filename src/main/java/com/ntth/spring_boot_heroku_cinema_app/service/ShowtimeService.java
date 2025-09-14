@@ -26,6 +26,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -44,6 +45,10 @@ public class ShowtimeService {
     private static final ZoneId VN = ZoneId.of("Asia/Ho_Chi_Minh");  //múi giờ VN
     private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
 
+    public Showtime getById(String showtimeId) {
+        Optional<Showtime> optionalShowtime = showtimeRepository.findById(showtimeId);
+        return optionalShowtime.orElse(null);  // Hoặc throw exception nếu cần
+    }
 
     public List<ShowtimeResponse> getAllShowtimes() {                     // sắp xếp theo thời gian
         return showtimeRepository.findAll(Sort.by("startAt").ascending())
