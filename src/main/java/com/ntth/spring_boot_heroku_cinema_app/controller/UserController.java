@@ -200,5 +200,4 @@ public class UserController {
         userRepo.save(u);
         return ResponseEntity.noContent().build(); // 204
     }
-
 }

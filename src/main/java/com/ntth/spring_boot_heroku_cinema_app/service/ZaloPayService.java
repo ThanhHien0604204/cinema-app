@@ -52,14 +52,28 @@ public class ZaloPayService {
     @Value("${app.publicBaseUrl:http://localhost:8080}")   // (tuỳ chọn) nếu code còn dùng
     private String publicBaseUrl;
 
+    @Value("${app.deeplink:}")  // ví dụ: myapp://zp-callback
+    private String deeplinkBase;
+
     /** Tạo đơn đặt hàng ZaloPay, trả order_url cho FE mở app. */
     public Map<String, Object> createOrder(Ticket b, String appUser) {
+        String redirect;
+        if (deeplinkBase != null && !deeplinkBase.isBlank()) {
+            String sep = deeplinkBase.contains("?") ? "&" : "?";
+            redirect = deeplinkBase + sep + "bookingId=" + b.getId();
+        } else {
+            redirect = ensureNoTrailingSlash(publicBaseUrl)
+                    + "/api/payments/zalopay/return?bookingId=" + b.getId();
+        }
+        String cancel = redirect + (redirect.contains("?") ? "&" : "?") + "canceled=1";
+
         URI endpoint = absoluteHttpUrl(createUrl);
 
         String appTransId = YYMMDD.format(LocalDate.now()) + "_" + b.getBookingCode();
 
         Map<String, Object> embed = new LinkedHashMap<>();
         embed.put("redirecturl", ensureNoTrailingSlash(publicBaseUrl) + "/payments/zalopay/return");
+        embed.put("cancelurl",   cancel);
         embed.put("merchantinfo", "bookingId=" + b.getId());
         String embedData = toJson(embed);
 
