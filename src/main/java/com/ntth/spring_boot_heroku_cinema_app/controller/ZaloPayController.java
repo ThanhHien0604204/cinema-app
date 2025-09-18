@@ -65,8 +65,9 @@ public class ZaloPayController {
         String sep = deeplinkBase.contains("?") ? "&" : "?";
         String target = deeplinkBase + (bookingId!=null? sep+"bookingId="+bookingId : "");
         if (canceled!=null) target += (target.contains("?")?"&":"?") + "canceled=1";
-        String html = "<!doctype html><meta http-equiv='refresh' content='0;url="+target+"'>" +
-                "<a href='"+target+"'>Mở ứng dụng</a>";
+
+        String html = "<!doctype html><meta http-equiv='refresh' content='0;url="+target+"'>"
+                + "<a href='"+target+"'>Mở ứng dụng</a>";
         return ResponseEntity.ok(html);
     }
 
