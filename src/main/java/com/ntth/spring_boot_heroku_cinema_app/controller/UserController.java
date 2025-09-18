@@ -14,7 +14,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -180,30 +182,23 @@ public class UserController {
     }
 
     // 2) Đổi mật khẩu người dùng hiện tại
-    @PatchMapping("/users/me/password")
+    @PatchMapping("/api/users/me/password")
     public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
-                                               @AuthenticationPrincipal CustomUserDetails me) {
-        // 1) Chưa đăng nhập
-        if (me == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
-        }
+                                               Authentication auth) {
 
-        // 2) Tìm user hiện tại
-        User u = userRepo.findById(me.getUser().getId())
+        String userId = resolveUserId(auth);  // <-- mấu chốt
+
+        User u = userRepo.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
-        // 3) Kiểm tra dữ liệu
-        // newPassword & confirm đã được @Valid kiểm tra rỗng/độ dài ở DTO
         if (!req.newPassword.equals(req.confirmNewPassword)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Xác nhận mật khẩu không khớp");
         }
 
-        // 4) PasswordEncoder không được null
         if (passwordEncoder == null) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Password encoder is not configured");
         }
 
-        // 5) Kiểm tra mật khẩu hiện tại
         String encoded = u.getPassword();
         if (encoded == null || encoded.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tài khoản chưa có mật khẩu hợp lệ");
@@ -211,15 +206,39 @@ public class UserController {
         if (!passwordEncoder.matches(req.currentPassword, encoded)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu hiện tại không đúng");
         }
-
-        // 6) Không cho trùng mật khẩu cũ
         if (passwordEncoder.matches(req.newPassword, encoded)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu mới không được trùng mật khẩu cũ");
         }
 
-        // 7) Cập nhật
         u.setPassword(passwordEncoder.encode(req.newPassword));
         userRepo.save(u);
-        return ResponseEntity.noContent().build(); // 204
+        return ResponseEntity.noContent().build();
+    }
+
+    private String resolveUserId(Authentication auth) {
+        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null ||
+                "anonymousUser".equals(auth.getPrincipal())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+        Object principal = auth.getPrincipal();
+
+        // Trường hợp bạn dùng CustomUserDetails
+        if (principal instanceof com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails cud) {
+            return cud.getUser().getId();
+        }
+        // Trường hợp là UserDetails chuẩn (username = email)
+        if (principal instanceof UserDetails ud) {
+            String email = ud.getUsername();
+            return userRepo.findByEmail(email)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"))
+                    .getId();
+        }
+        // Trường hợp là String (đa phần là email)
+        if (principal instanceof String email) {
+            return userRepo.findByEmail(email)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"))
+                    .getId();
+        }
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unsupported principal");
     }
 }

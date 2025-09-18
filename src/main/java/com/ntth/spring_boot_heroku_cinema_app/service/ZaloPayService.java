@@ -75,6 +75,8 @@ public class ZaloPayService {
         //embed.put("redirecturl", ensureNoTrailingSlash(publicBaseUrl) + "/payments/zalopay/return");
         embed.put("redirecturl", redirect);
         embed.put("cancelurl",   cancel);
+        embed.put("bookingId",   b.getId());
+        embed.put("bookingCode", b.getBookingCode());
         embed.put("merchantinfo", "bookingId=" + b.getId());
         String embedData = toJson(embed);
 
