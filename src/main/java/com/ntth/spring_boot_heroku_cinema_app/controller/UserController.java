@@ -182,34 +182,25 @@ public class UserController {
     }
 
     // 2) Đổi mật khẩu người dùng hiện tại
-    @PatchMapping("/api/users/me/password")
+    @PatchMapping(value = "/users/me/password", consumes = "application/json")
     public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
-                                               Authentication auth) {
-
-        String userId = resolveUserId(auth);  // <-- mấu chốt
-
-        User u = userRepo.findById(userId)
+                                               @AuthenticationPrincipal CustomUserDetails me) {
+        if (me == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+        User u = userRepo.findById(me.getUser().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
         if (!req.newPassword.equals(req.confirmNewPassword)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Xác nhận mật khẩu không khớp");
         }
-
-        if (passwordEncoder == null) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Password encoder is not configured");
-        }
-
-        String encoded = u.getPassword();
-        if (encoded == null || encoded.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tài khoản chưa có mật khẩu hợp lệ");
-        }
-        if (!passwordEncoder.matches(req.currentPassword, encoded)) {
+        if (u.getPassword() == null || u.getPassword().isBlank()
+                || !passwordEncoder.matches(req.currentPassword, u.getPassword())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu hiện tại không đúng");
         }
-        if (passwordEncoder.matches(req.newPassword, encoded)) {
+        if (passwordEncoder.matches(req.newPassword, u.getPassword())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu mới không được trùng mật khẩu cũ");
         }
-
         u.setPassword(passwordEncoder.encode(req.newPassword));
         userRepo.save(u);
         return ResponseEntity.noContent().build();

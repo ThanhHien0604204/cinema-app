@@ -49,7 +49,7 @@ public class ZaloPayController {
     }
 
     // 3) IPN callback từ ZaloPay (public)
-    @PostMapping(value = "/api/payments/zalopay/ipn", consumes = MediaType.ALL_VALUE)
+    @PostMapping(value = "/payments/zalopay/ipn", consumes = MediaType.ALL_VALUE)
     public ResponseEntity<Map<String, Object>> ipn(
             @RequestParam Map<String, String> form,
             @RequestBody(required = false) String body,
