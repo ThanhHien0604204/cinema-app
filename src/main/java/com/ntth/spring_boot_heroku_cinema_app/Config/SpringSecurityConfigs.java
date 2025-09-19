@@ -90,54 +90,66 @@ public class SpringSecurityConfigs {
                 .authorizeHttpRequests(requests
                         -> requests
                         //toàn bộ các request đến /api/** được truy cập công khai (không cần đăng nhập)
-//                        .requestMatchers("/api/**").permitAll()
-                                .requestMatchers("/error").permitAll()
-                                .requestMatchers("/api/payments/zalopay/ipn").permitAll()
-                                .requestMatchers(HttpMethod.GET,  "/payments/zalopay/return").permitAll()
-                        // Public: login
-                        .requestMatchers(HttpMethod.POST, "/api/login","/api/register").permitAll()
-
-                        // Public: đọc dữ liệu chung
+                        // Public endpoints
+                        .requestMatchers("/error").permitAll()
+                        .requestMatchers("/api/payments/zalopay/ipn").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/payments/zalopay/return").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/login", "/api/register").permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/movies/**",
-                                "/api/genres/**",
-                                "/api/users/**",// GET /api/users/{id} và GET /api/users?ids=...
                                 "/api/showtimes/**",
-                                "/api/cinemas/**"
+                                "/api/rooms/**",
+                                "/api/users/{userId}",
+                                "/api/users",
+                                "/api/reviews/movie/{movieId}",
+                                "/api/reviews/movie/{movieId}/summary"
                         ).permitAll()
 
-                        // Public: list & summary review theo movie
+                        // Authenticated endpoints
                         .requestMatchers(HttpMethod.GET,
-                                "/api/reviews/movie/*",
-                                "/api/reviews/movie/*/summary"
-                        ).permitAll()
-
-                        // Cần đăng nhập: review của tôi / upsert / delete
-                        .requestMatchers(HttpMethod.GET,  "/api/reviews/movie/*/me").authenticated()
-                        .requestMatchers(HttpMethod.POST, "/api/reviews").authenticated()
-                        .requestMatchers(HttpMethod.DELETE,"/api/reviews/**").authenticated()
-
-                        // Cần đăng nhập: chỉnh sửa hồ sơ & đổi mật khẩu
-                        .requestMatchers(HttpMethod.PUT,   "/api/users/me").authenticated()
+                                "/api/user/me",
+                                "/api/reviews/me",
+                                "/api/reviews/movie/{movieId}/me",
+                                "/api/bookings/me",
+                                "/api/bookings/{id}",
+                                "/api/bookings/code/{code}",
+                                "/api/test_users/me"
+                        ).authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/bookings",
+                                "/api/bookings/zalopay",
+                                "/api/payments/zalopay/create",
+                                "/api/reviews",
+                                "/api/showtimes/{showtimeId}/hold"
+                        ).authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/users/me").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/users/me/password").authenticated()
-                                .requestMatchers("/api/showtimes/{id}",
-                                        "/api/bookings/**",
-                                        "/api/payments/zalopay/create",
-                                        "/api/bookings/zalopay").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/bookings/{id}/cancel").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/reviews/{id}").authenticated()
 
-                        // ADMIN: Quản lý phim, thể loại, người dùng
-//                        .requestMatchers(HttpMethod.GET, "/products").hasRole("ADMIN")
-//                        .requestMatchers(HttpMethod.GET,
-//                                "/products/**").hasAnyRole("USER", "ADMIN")
-//                        .anyRequest().authenticated())//Tất cả request khác ngoài /api/** bắt buộc phải đăng nhập
-                        // Các request khác: cho qua
+                        // Admin endpoints
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/movies",
+                                "/api/showtimes",
+                                "/api/rooms"
+                        ).hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT,
+                                "/api/movies/{id}",
+                                "/api/showtimes/{id}",
+                                "/api/rooms/{id}"
+                        ).hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE,
+                                "/api/movies/{id}",
+                                "/api/showtimes/{id}",
+                                "/api/rooms/{id}"
+                        ).hasRole("ADMIN")
+
+                        // Default: cho qua các request khác (có thể siết chặt hơn trong production)
                         .anyRequest().permitAll()
                 )
-                // Xử lý 401/403 gọn gàng
                 .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)) // 401 khi chưa đăng nhập
+                        .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
                 )
-                // Chèn JwtFilter "trước" filter mặc định UsernamePasswordAuthenticationFilter
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .logout(logout -> logout.logoutSuccessUrl("/login").permitAll());
         return http.build();
