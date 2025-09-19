@@ -112,6 +112,7 @@ public class ZaloPayController {
         }
     }
 
+
     //dùng để dựng URL quay về ứng dụng sau khi thanh toán xong
     @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> zpReturn(@RequestParam(required=false) String bookingId,
