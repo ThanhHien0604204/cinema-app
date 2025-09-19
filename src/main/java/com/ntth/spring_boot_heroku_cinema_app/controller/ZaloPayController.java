@@ -3,15 +3,12 @@ package com.ntth.spring_boot_heroku_cinema_app.controller;
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
 import com.ntth.spring_boot_heroku_cinema_app.service.TicketService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -19,11 +16,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class ZaloPayController {
-    @Autowired
-    private TicketService ticketService;
+    private final TicketService ticketService;
 
-    @Autowired
-    private Environment env;
     @Value("${app.deeplink:}")
     private String deeplinkBase; // ví dụ: "myapp://zp-callback"
 
@@ -116,20 +110,7 @@ public class ZaloPayController {
             return ResponseEntity.ok(Map.of("return_code", 1, "return_message", "error"));
         }
     }
-    @PostMapping("/payments/zalopay/confirm")
-    public ResponseEntity<Map> confirmBooking(@RequestBody Map<String, String> body, @AuthenticationPrincipal JwtUser user) {
-        String bookingId = body.get("bookingId");
-        if (bookingId == null || bookingId.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "MISSING_BOOKING_ID");
-        }
-        // Kiểm tra môi trường sandbox
-        String activeProfile = env.getProperty("spring.profiles.active", "");
-        if (!activeProfile.contains("dev")) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ONLY_AVAILABLE_IN_SANDBOX");
-        }
-        ticketService.confirmBooking(bookingId, user);
-        return ResponseEntity.ok(Map.of("status", "CONFIRMED"));
-    }
+
 
     //dùng để dựng URL quay về ứng dụng sau khi thanh toán xong
     @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
@@ -157,4 +138,3 @@ public class ZaloPayController {
         ));
     }
 }
-

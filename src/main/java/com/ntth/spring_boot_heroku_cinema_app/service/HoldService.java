@@ -87,4 +87,3 @@ public class HoldService {
         return seats.size() * 60000L;
     }
 }
-
