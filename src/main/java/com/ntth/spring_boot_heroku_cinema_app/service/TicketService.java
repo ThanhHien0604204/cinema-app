@@ -2,6 +2,7 @@ package com.ntth.spring_boot_heroku_cinema_app.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.SeatLock;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
 import com.ntth.spring_boot_heroku_cinema_app.repository.SeatLedgerRepository;
@@ -115,126 +116,66 @@ public class TicketService {
     @Transactional
     public void handleZpIpn(Map<String, String> req) {
         Logger log = LoggerFactory.getLogger(getClass());
-
         log.info("Received ZaloPay IPN: {}", req);
-        // -------- 1) Lấy data/mac & verify chữ ký --------
         String data = req.get("data");
-        String mac  = req.get("mac");
+        String mac = req.get("mac");
         if (data == null || mac == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "MISSING_DATA_OR_MAC");
+            log.error("Missing data or mac in IPN");
+            return;
         }
-
         Map<String, Object> verify = zalo.verifyIpn(data, mac);
         int returnCode = (int) verify.getOrDefault("return_code", -1);
         if (returnCode != 1) {
             log.error("Invalid IPN signature: {}", verify);
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_IPN");
+            return;
         }
-
-        @SuppressWarnings("unchecked")
         Map<String, Object> parsed = (Map<String, Object>) verify.get("parsed");
         if (parsed == null) {
             log.error("Failed to parse IPN data");
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "PARSE_FAILED");
+            return;
         }
-
-        // -------- 2) Lấy app_trans_id -> bookingCode --------
         String appTransId = String.valueOf(parsed.get("app_trans_id"));
-
         int status = ((Number) parsed.getOrDefault("status", -1)).intValue();
         log.info("IPN for app_trans_id={}, status={}", appTransId, status);
+        String bookingId = req.get("bookingId");
+        if (bookingId == null) {
+            log.error("Missing bookingId in IPN");
+            return;
+        }
+        Ticket ticket = ticketRepo.findById(bookingId).orElse(null);
+        if (ticket == null || !"PENDING_PAYMENT".equals(ticket.getStatus())) {
+            log.warn("Booking {} not found or not PENDING_PAYMENT", bookingId);
+            return;
+        }
         if (status == 0) {
-            log.info("IPN pending (status=0) for app_trans_id={}", appTransId);
-            return; // Không làm gì nếu pending
-        }
-
-        if (appTransId == null || appTransId.isEmpty() || !appTransId.contains("_")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_APP_TRANS_ID");
-        }
-        String bookingCode = appTransId.split("_", 2)[1];
-
-        Ticket b = ticketRepo.findByBookingCode(bookingCode)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
-
-        // Đảm bảo có PaymentInfo
-        Ticket.PaymentInfo pay = b.getPayment();
-        if (pay == null) {
-            pay = new Ticket.PaymentInfo();
-            pay.setGateway("ZALOPAY");
-            b.setPayment(pay);
-        }
-
-        // Ghi zp_trans_id/txId (kể cả TEST_… cho IPN giả)
-        Object zptObj = parsed.get("zp_trans_id");
-        if (zptObj != null) {
-            String zpt = String.valueOf(zptObj);
-            pay.setTxId(zpt);
-            try { pay.setZpTransId(zpt); } catch (Throwable ignore) {}
-        }
-        // Lưu raw luôn để trace
-        pay.setRaw(parsed);
-
-        // -------- 3) Đọc status/amount từ IPN --------
-        int statusFromZp = safeInt(parsed.get("status"), 0);
-
-        long amountFromZp = 0L;
-        Object amountObj = parsed.get("amount");
-        if (amountObj instanceof Number) {
-            amountFromZp = ((Number) amountObj).longValue();
-        } else if (amountObj != null) {
-            try { amountFromZp = Long.parseLong(String.valueOf(amountObj)); } catch (Exception ignore) {}
-        }
-
-        // -------- 4) Check amount an toàn (không quăng lỗi nếu null/không parse được) --------
-        Long bookingAmount = b.getAmount(); // có thể null (wrapper)
-        if (bookingAmount != null && amountFromZp > 0 && bookingAmount.longValue() != amountFromZp) {
-            log.warn("IPN amount mismatch booking={} zp={}", bookingAmount, amountFromZp);
-            // đánh FAILED để FE thấy rõ, không throw để ZP không retry vô hạn
-            try {
-                b.setStatus("FAILED");
-                ticketRepo.save(b);
-            } catch (Throwable ignore) {}
-            return;
-        }
-
-        // -------- 5) Xử lý theo status từ ZaloPay --------
-        if (statusFromZp == 1) {
-            // Đã thanh toán thành công
-            if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
-                b.setStatus("CONFIRMED");
-                pay.setPaidAt(Instant.now());
-                ticketRepo.save(b);
-
-                long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
-                if (updated != (b.getSeats() == null ? 0 : b.getSeats().size())) {
-                    // Trường hợp hiếm: ledger không confirm đủ ghế
-                    throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
-                }
-                // Xóa hold
-                try { lockRepo.deleteById(b.getHoldId()); } catch (Throwable ignore) {}
-
-                log.debug("IPN confirm: bookingId={}, holdId={}, showtimeId={}, seats={}",
-                        b.getId(), b.getHoldId(), b.getShowtimeId(), b.getSeats());
+            log.info("IPN pending (status=0) for app_trans_id={}, bookingId={}", appTransId, bookingId);
+        } else if (status == 1) {
+            log.info("IPN success (status=1) for app_trans_id={}, bookingId={}", appTransId, bookingId);
+            ticket.setStatus("CONFIRMED");
+            Ticket.PaymentInfo payment = ticket.getPayment();
+            if (payment == null) {
+                payment = new Ticket.PaymentInfo();
+                ticket.setPayment(payment);
             }
-            return;
-        }
-
-        if (statusFromZp == 0) {
-            // Pending: giữ nguyên PENDING_PAYMENT để FE tiếp tục poll
-            if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
-                b.setStatus("PENDING_PAYMENT");
-                ticketRepo.save(b);
+            payment.setGateway("ZALOPAY");
+            payment.setZpTransId(String.valueOf(parsed.get("zp_trans_id")));
+            payment.setPaidAt(Instant.now());
+            long updated = ledgerRepo.confirmMany(ticket.getShowtimeId(), ticket.getSeats(), bookingId, ticket.getHoldId());
+            if (updated != ticket.getSeats().size()) {
+                log.error("Failed to confirm seats for booking {}", bookingId);
+                return;
             }
-            log.debug("IPN pending (status=0) booking={} keep PENDING_PAYMENT", bookingCode);
-            return;
+            lockRepo.deleteById(ticket.getHoldId());
+            ticketRepo.save(ticket);
+        } else if (status == -1) {
+            log.info("IPN failed (status=-1) for app_trans_id={}, bookingId={}", appTransId, bookingId);
+            ticket.setStatus("FAILED");
+            ledgerRepo.freeMany(ticket.getShowtimeId(), ticket.getSeats(), bookingId);
+            lockRepo.deleteById(ticket.getHoldId());
+            ticketRepo.save(ticket);
+        } else {
+            log.warn("Unknown IPN status {} for app_trans_id={}, bookingId={}", status, appTransId, bookingId);
         }
-
-        // Các status còn lại coi như fail/cancel
-        if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
-            b.setStatus("CANCELED");
-            ticketRepo.save(b);
-        }
-        log.debug("IPN not success (status={}) booking={} -> CANCELED", statusFromZp, bookingCode);
     }
 
     private int safeInt(Object o, int def) {
@@ -361,7 +302,37 @@ public class TicketService {
         return b;
     }
 
-
+    @Transactional
+    public void confirmBooking(String bookingId, JwtUser user) {
+        Logger log = LoggerFactory.getLogger(getClass());
+        Ticket ticket = ticketRepo.findById(bookingId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+        if (!ticket.getUserId().equals(user.getUserId())) { // Sửa: So sánh userId thay vì email
+            log.warn("Unauthorized attempt to confirm booking {} by user {}", bookingId, user.getUserId());
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "UNAUTHORIZED");
+        }
+        if (!"PENDING_PAYMENT".equals(ticket.getStatus())) {
+            log.warn("Booking {} is not in PENDING_PAYMENT, current status: {}", bookingId, ticket.getStatus());
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_STATUS");
+        }
+        ticket.setStatus("CONFIRMED");
+        Ticket.PaymentInfo payment = ticket.getPayment();
+        if (payment == null) {
+            payment = new Ticket.PaymentInfo();
+            ticket.setPayment(payment);
+        }
+        payment.setGateway("ZALOPAY");
+        payment.setZpTransId("SANDBOX_" + System.currentTimeMillis());
+        payment.setPaidAt(Instant.now()); // Thêm: Ghi thời gian thanh toán
+        long updated = ledgerRepo.confirmMany(ticket.getShowtimeId(), ticket.getSeats(), bookingId, ticket.getHoldId());
+        if (updated != ticket.getSeats().size()) {
+            log.error("Failed to confirm seats for booking {}", bookingId);
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN");
+        }
+        lockRepo.deleteById(ticket.getHoldId());
+        ticketRepo.save(ticket);
+        log.info("Booking {} confirmed successfully for user {}", bookingId, user.getUserId());
+    }
     /**
      * Tạo mã ngẫu nhiên theo định dạng UIN-XXXXXX
      * @return Chuỗi mã ngẫu nhiên, ví dụ: UIN-8F3K2N
