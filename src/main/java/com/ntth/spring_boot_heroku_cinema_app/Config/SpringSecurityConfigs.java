@@ -93,6 +93,7 @@ public class SpringSecurityConfigs {
 //                        .requestMatchers("/api/**").permitAll()
                                 .requestMatchers("/error").permitAll()
                                 .requestMatchers("/api/payments/zalopay/ipn").permitAll()
+                                .requestMatchers(HttpMethod.GET,  "/payments/zalopay/return").permitAll()
                         // Public: login
                         .requestMatchers(HttpMethod.POST, "/api/login","/api/register").permitAll()
 

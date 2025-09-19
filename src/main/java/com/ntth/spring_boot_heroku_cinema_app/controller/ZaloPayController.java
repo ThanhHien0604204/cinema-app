@@ -64,19 +64,16 @@ public class ZaloPayController {
             // 1) Nếu form rỗng mà có body, thử parse theo content-type
             if ((params.isEmpty() || !params.containsKey("data")) && body != null && !body.isBlank()) {
                 if (contentType != null && contentType.toLowerCase().contains("application/json")) {
-                    // ZP gửi JSON: { "data": "...", "mac": "..." }
-                    com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                    var om = new com.fasterxml.jackson.databind.ObjectMapper();
                     Map<String,Object> json = om.readValue(body, new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
-                    if (json.get("data") != null)    params.put("data", String.valueOf(json.get("data")));
-                    if (json.get("mac")  != null)    params.put("mac",  String.valueOf(json.get("mac")));
+                    if (json.get("data") != null) params.put("data", String.valueOf(json.get("data")));
+                    if (json.get("mac")  != null) params.put("mac",  String.valueOf(json.get("mac")));
                 } else {
-                    // Thử parse tay kiểu form-urlencoded trong body
-                    String[] pairs = body.split("&");
-                    for (String p : pairs) {
-                        int idx = p.indexOf('=');
-                        if (idx > 0) {
-                            String k = java.net.URLDecoder.decode(p.substring(0, idx), java.nio.charset.StandardCharsets.UTF_8);
-                            String v = java.net.URLDecoder.decode(p.substring(idx + 1), java.nio.charset.StandardCharsets.UTF_8);
+                    for (String p : body.split("&")) {
+                        int i = p.indexOf('=');
+                        if (i > 0) {
+                            String k = java.net.URLDecoder.decode(p.substring(0,i), java.nio.charset.StandardCharsets.UTF_8);
+                            String v = java.net.URLDecoder.decode(p.substring(i+1), java.nio.charset.StandardCharsets.UTF_8);
                             params.put(k, v);
                         }
                     }
@@ -87,7 +84,7 @@ public class ZaloPayController {
             try {
                 String data = params.get("data");
                 if (data != null) {
-                    com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                    var om = new com.fasterxml.jackson.databind.ObjectMapper();
                     Map<String,Object> dataJson = om.readValue(data, new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
                     Object embedObj = dataJson.get("embed_data");
                     Map<String,Object> embed = null;
@@ -125,9 +122,8 @@ public class ZaloPayController {
         String sep = deeplinkBase.contains("?") ? "&" : "?";
         String target = deeplinkBase + (bookingId!=null? sep+"bookingId="+bookingId : "");
         if (canceled!=null) target += (target.contains("?")?"&":"?") + "canceled=1";
-
-        String html = "<!doctype html><meta http-equiv='refresh' content='0;url="+target+"'>"
-                + "<a href='"+target+"'>Mở ứng dụng</a>";
+        String html = "<!doctype html><meta http-equiv='refresh' content='0;url="+target+"'>" +
+                "<a href='"+target+"'>Mở ứng dụng</a>";
         return ResponseEntity.ok(html);
     }
 

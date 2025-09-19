@@ -61,6 +61,8 @@ public class ZaloPayService {
 
         String appTransId = YYMMDD.format(LocalDate.now()) + "_" + b.getBookingCode();
 
+        Map<String, Object> embed = new LinkedHashMap<>();
+
         String redirect;
         if (deeplinkBase != null && !deeplinkBase.isBlank()) {
             String sep = deeplinkBase.contains("?") ? "&" : "?";
@@ -71,7 +73,6 @@ public class ZaloPayService {
         }
         String cancel = redirect + (redirect.contains("?") ? "&" : "?") + "canceled=1";
 
-        Map<String, Object> embed = new LinkedHashMap<>();
         //embed.put("redirecturl", ensureNoTrailingSlash(publicBaseUrl) + "/payments/zalopay/return");
         embed.put("redirecturl", redirect);
         embed.put("cancelurl",   cancel);
