@@ -44,20 +44,20 @@ public class UserController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<String> register(@RequestBody User user) {
+    public ResponseEntity<Void> register(@RequestBody User user) {
         try {
             if (user.getEmail() == null || user.getEmail().isEmpty()) {
-                return ResponseEntity.badRequest().body("Email không được để trống");
+                return ResponseEntity.badRequest().build(); // Không cần body
             }
             if (user.getPassword() == null || user.getPassword().isEmpty()) {
-                return ResponseEntity.badRequest().body("Mật khẩu không được để trống");
+                return ResponseEntity.badRequest().build(); // Không cần body
             }
             user.setPassword(passwordEncoder.encode(user.getPassword()));
             user.setRole("USER");
             userRepo.save(user);
-            return ResponseEntity.ok("Đăng ký thành công!");
+            return ResponseEntity.ok().build(); // Trả về 200 OK, body rỗng
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Lỗi đăng ký: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build(); // Không cần body
         }
     }
 

@@ -116,6 +116,7 @@ public class TicketService {
     public void handleZpIpn(Map<String, String> req) {
         Logger log = LoggerFactory.getLogger(getClass());
 
+        log.info("Received ZaloPay IPN: {}", req);
         // -------- 1) Lấy data/mac & verify chữ ký --------
         String data = req.get("data");
         String mac  = req.get("mac");
@@ -126,17 +127,27 @@ public class TicketService {
         Map<String, Object> verify = zalo.verifyIpn(data, mac);
         int returnCode = (int) verify.getOrDefault("return_code", -1);
         if (returnCode != 1) {
+            log.error("Invalid IPN signature: {}", verify);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_IPN");
         }
 
         @SuppressWarnings("unchecked")
         Map<String, Object> parsed = (Map<String, Object>) verify.get("parsed");
         if (parsed == null) {
+            log.error("Failed to parse IPN data");
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "PARSE_FAILED");
         }
 
         // -------- 2) Lấy app_trans_id -> bookingCode --------
         String appTransId = String.valueOf(parsed.get("app_trans_id"));
+
+        int status = ((Number) parsed.getOrDefault("status", -1)).intValue();
+        log.info("IPN for app_trans_id={}, status={}", appTransId, status);
+        if (status == 0) {
+            log.info("IPN pending (status=0) for app_trans_id={}", appTransId);
+            return; // Không làm gì nếu pending
+        }
+
         if (appTransId == null || appTransId.isEmpty() || !appTransId.contains("_")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_APP_TRANS_ID");
         }
