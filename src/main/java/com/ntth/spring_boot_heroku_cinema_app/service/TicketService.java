@@ -113,164 +113,154 @@ public class TicketService {
     public void handleZpIpn(Map<String, String> req) {
         Logger log = LoggerFactory.getLogger(getClass());
 
-        // -------- 1) Lấy data/mac & verify MAC qua SDK --------
+        // -------- 1) Lấy & kiểm tra input tối thiểu --------
         String data = req.get("data");
         String mac  = req.get("mac");
         if (data == null || mac == null) {
-            log.warn("IPN missing data/mac");
-            return; // KHÔNG throw: tránh 400 cho ZP
-        }
-
-        Map<String, Object> v;
-        try {
-            v = zalo.verifyIpn(data, mac); // SDK của bạn
-        } catch (Throwable e) {
-            log.warn("verifyIpn exception", e);
-            return;
-        }
-        int vcode = (int) v.getOrDefault("return_code", -1);
-        if (vcode != 1) {
-            log.warn("IPN invalid return_code={}", vcode);
+            // Thiếu dữ liệu IPN -> vẫn trả 200 ở controller, nhưng nội bộ bỏ qua
+            log.warn("IPN missing data or mac");
             return;
         }
 
-        // -------- 2) Parse payload đã verify --------
+        // -------- 2) Verify chữ ký IPN từ ZaloPay SDK --------
+        Map<String, Object> v = zalo.verifyIpn(data, mac);
+        int rc = (int) v.getOrDefault("return_code", -1);
+        if (rc != 1) {
+            log.warn("IPN verify failed return_code={}", rc);
+            return; // không throw để tránh ZP retry quá nhiều
+        }
+
+        // -------- 3) Parse payload --------
         @SuppressWarnings("unchecked")
         Map<String, Object> parsed = (Map<String, Object>) v.get("parsed");
         if (parsed == null) {
-            log.warn("IPN parsed=null");
+            log.warn("IPN parsed payload is null");
             return;
         }
-        Object amountObj = parsed.get("amount");
-        if (amountObj == null) {
-            log.warn("IPN missing amount");
-            return;
-        }
-        long amountFromZp;
-        try { amountFromZp = ((Number) amountObj).longValue(); }
-        catch (Throwable e) { log.warn("amount parse error", e); return; }
 
-        String appTransId = String.valueOf(parsed.get("app_trans_id")); // vd: 250919_UIN-CTWE43
-        if (appTransId == null || appTransId.isEmpty()) {
-            log.warn("IPN missing app_trans_id");
+        String appTransId = String.valueOf(parsed.get("app_trans_id"));  // vd: 250919_UIN-CTWE43
+        if (appTransId == null || appTransId.isEmpty() || !appTransId.contains("_")) {
+            log.warn("IPN invalid app_trans_id={}", appTransId);
             return;
         }
-        String[] parts = appTransId.split("_", 2);
-        if (parts.length != 2) {
-            log.warn("IPN invalid app_trans_id format: {}", appTransId);
-            return;
-        }
-        String bookingCode = parts[1];
+        String bookingCode = appTransId.substring(appTransId.indexOf('_') + 1);
 
-        // -------- 3) Tìm booking theo bookingCode --------
-        Ticket b = ticketRepo.findByBookingCode(bookingCode)
-                .orElse(null);
+        // -------- 4) Tìm booking --------
+        Ticket b = ticketRepo.findByBookingCode(bookingCode).orElse(null);
         if (b == null) {
-            log.warn("IPN booking not found: {}", bookingCode);
+            log.warn("IPN booking not found bookingCode={}", bookingCode);
             return;
         }
 
-        // -------- 4) Idempotent nếu đã CONFIRMED --------
+        // Idempotent: đã CONFIRMED thì thôi
         if ("CONFIRMED".equalsIgnoreCase(b.getStatus())) {
-            log.info("IPN booking {} already CONFIRMED. Skip.", bookingCode);
+            log.info("IPN ignored; already CONFIRMED booking={}", bookingCode);
             return;
         }
 
-        // -------- 5) Kiểm tra số tiền (an toàn kiểu dữ liệu) --------
-        long bookingAmount;
-        Object amtObj = null;
+        // -------- 5) Lấy status & amount từ IPN --------
+        int zpStatus;
         try {
-            amtObj = b.getAmount();                 // int/Integer/Long... sẽ auto-box về Object
+            zpStatus = ((Number) parsed.getOrDefault("status", 0)).intValue();
+        } catch (Throwable ignore) {
+            zpStatus = 0;
+        }
+
+        long amountFromZp;
+        try {
+            amountFromZp = ((Number) parsed.get("amount")).longValue();
+        } catch (Throwable t) {
+            try {
+                amountFromZp = Long.parseLong(String.valueOf(parsed.get("amount")));
+            } catch (Exception e) {
+                log.warn("IPN amount missing/invalid booking={}", bookingCode);
+                return;
+            }
+        }
+
+        // -------- 6) So sánh amount (an toàn kiểu dữ liệu) --------
+        long bookingAmount;
+        Object amtObj = b.getAmount();
+        try {
             bookingAmount = ((Number) amtObj).longValue();
         } catch (Throwable t) {
-            // Fallback: parse từ String nếu không phải Number
             try {
-                bookingAmount = Long.parseLong(String.valueOf(b.getAmount()));
+                bookingAmount = Long.parseLong(String.valueOf(amtObj));
             } catch (Exception e) {
-                log.warn("IPN cannot parse booking amount: {}", String.valueOf(b.getAmount()));
-                // Không ném lỗi để tránh 400; chỉ bỏ qua xử lý để ZP không retry vô hạn
+                log.warn("IPN cannot parse booking amount booking={} raw={}", bookingCode, String.valueOf(amtObj));
                 return;
             }
         }
-
         if (bookingAmount != amountFromZp) {
-            log.warn("IPN amount mismatch bookingAmt={} (type={}) vs zpAmt={}",
-                    bookingAmount,
-                    (amtObj == null ? "null" : amtObj.getClass().getSimpleName()),
-                    amountFromZp);
-            // Đánh FAILED để FE thấy rõ, không throw để tránh rollback
-            try {
-                b.setStatus("FAILED");
-                ticketRepo.save(b);
-            } catch (Throwable ignore) {}
+            log.warn("IPN amount mismatch booking={} bookingAmt={} zpAmt={}", bookingCode, bookingAmount, amountFromZp);
+            // Đánh FAILED để FE thấy rõ; không throw để tránh retry
+            try { b.setStatus("FAILED"); ticketRepo.save(b); } catch (Throwable ignore) {}
             return;
         }
-        int payStatus = 0;
-        try { payStatus = ((Number) parsed.getOrDefault("status", 0)).intValue(); }
-        catch (Throwable ignore) {}
 
-        // -------- 6) Nếu thanh toán THÀNH CÔNG (status=1): confirm ghế + update payment --------
-        if (payStatus == 1) {
-            // Chuẩn bị PaymentInfo
-            Ticket.PaymentInfo p = b.getPayment();
-            if (p == null) {
-                p = new Ticket.PaymentInfo();
-                p.setGateway("ZALOPAY");
-            }
-            p.setPaidAt(Instant.now());
-            Object zpt = parsed.get("zp_trans_id");
-            if (zpt != null) {
-                try { p.setTxId(String.valueOf(zpt)); } catch (Throwable ignore) {}
-                try { p.setZpTransId(String.valueOf(zpt)); } catch (Throwable ignore) {}
-            }
-            try { p.setRaw(parsed); } catch (Throwable ignore) {}
-            b.setPayment(p);
+        // -------- 7) Cập nhật PaymentInfo chung --------
+        Ticket.PaymentInfo pay = b.getPayment();
+        if (pay == null) {
+            pay = new Ticket.PaymentInfo();
+            pay.setGateway("ZALOPAY");
+        }
+        Object zptObj = parsed.get("zp_trans_id");
+        if (zptObj != null) {
+            try { pay.setTxId(String.valueOf(zptObj)); } catch (Throwable ignore) {}
+            try { pay.setZpTransId(String.valueOf(zptObj)); } catch (Throwable ignore) {}
+        }
+        try { pay.setRaw(parsed); } catch (Throwable ignore) {}
+        b.setPayment(pay);
 
-            // Thử confirm ghế từ ledger bằng holdId cũ (revive nếu IPN đến trễ)
-            String showtimeId = b.getShowtimeId();
-            List<String> seats = b.getSeats();
-            String holdId     = b.getHoldId();
+        // -------- 8) Nhánh trạng thái --------
+        if (zpStatus == 1) {
+            // Thành công
+            b.setStatus("CONFIRMED");
+            try { pay.setPaidAt(Instant.now()); } catch (Throwable ignore) {}
+            ticketRepo.save(b);
 
-            log.debug("IPN confirm try: bookingId={}, holdId={}, showtimeId={}, seats={}",
-                    b.getId(), holdId, showtimeId, seats);
-
-            long updated = 0L;
-            try {
-                updated = ledgerRepo.confirmMany(showtimeId, seats, b.getId(), holdId);
-            } catch (Throwable e) {
-                log.warn("ledger.confirmMany exception", e);
-            }
-
-            if (updated == (seats == null ? 0 : seats.size())) {
-                // Confirm ghế OK
-                b.setStatus("CONFIRMED");
-                ticketRepo.save(b);
-
-                // Xoá SeatLock nếu còn
-                try {
-                    if (holdId != null) lockRepo.deleteById(holdId);
-                } catch (Throwable ignore) {}
-
-                log.info("IPN booking {} -> CONFIRMED", bookingCode);
-                return;
-            } else {
-                // Không confirm được ghế: có thể do hold đã hết & ghế bị người khác giữ
-                log.warn("IPN cannot confirm seats for booking {} (updated={}, seats={})",
-                        bookingCode, updated, seats == null ? 0 : seats.size());
-                // Đánh FAILED để FE hiển thị đúng
+            // Xác nhận ghế trong ledger
+            long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
+            if (updated != b.getSeats().size()) {
+                log.error("IPN seat confirm mismatch booking={} updated={} expected={}",
+                        bookingCode, updated, b.getSeats().size());
+                // Trong trường hợp hiếm, đánh FAILED để FE biết, bạn có thể chọn rollback hoặc manual fix
                 b.setStatus("FAILED");
                 ticketRepo.save(b);
                 return;
             }
+
+            // Xoá seat lock (nếu còn)
+            try { lockRepo.deleteById(b.getHoldId()); } catch (Throwable ignore) {}
+
+            log.info("IPN CONFIRMED booking={} seats={} showtime={}", bookingCode, b.getSeats(), b.getShowtimeId());
+            return;
         }
 
-        // -------- 7) Nếu thanh toán KHÔNG thành công: set CANCELED (và có thể release ghế) --------
-        log.info("IPN booking {} not paid (status={}), set CANCELED", bookingCode, payStatus);
-        b.setStatus("CANCELED");
-        ticketRepo.save(b);
+        // status = 0 -> pending/processing: KHÔNG huỷ, giữ nguyên PENDING_PAYMENT
+        if (zpStatus == 0) {
+            if (!"PENDING_PAYMENT".equalsIgnoreCase(b.getStatus())) {
+                b.setStatus("PENDING_PAYMENT");
+                ticketRepo.save(b);
+            } else {
+                // vẫn lưu raw để trace
+                try { ticketRepo.save(b); } catch (Throwable ignore) {}
+            }
+            log.info("IPN pending (status=0) booking={} keep PENDING_PAYMENT", bookingCode);
+            return;
+        }
 
-        // Tuỳ bạn có hàm releaseSeats hay không. Nếu có, mở phần này:
-        // try { ledgerRepo.releaseSeats(b.getShowtimeId(), b.getSeats(), b.getHoldId()); } catch (Throwable ignore) {}
+        // Các trạng thái thất bại/hoàn/đảo (tuỳ tài liệu ZP) -> huỷ
+        // Ví dụ: -1 (fail), 2 (refund), 3 (chargeback/reversal) — điều chỉnh theo tài liệu của bạn
+        b.setStatus("CANCELED");
+        try { ticketRepo.save(b); } catch (Throwable ignore) {}
+        // (Tuỳ business) Có thể release ghế nếu đã lock
+        try {
+            // Nếu bạn có hàm release riêng:
+            // ledgerRepo.releaseSeats(b.getShowtimeId(), b.getSeats(), b.getHoldId());
+            lockRepo.deleteById(b.getHoldId());
+        } catch (Throwable ignore) {}
+        log.info("IPN set CANCELED booking={} status={}", bookingCode, zpStatus);
     }
 
     @Transactional
