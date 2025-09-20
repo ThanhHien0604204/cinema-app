@@ -267,8 +267,8 @@ public class ZaloPayController {
 
     // 6) Cập nhật zpReturn để gọi status check
     @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<String> zpReturn(@RequestParam(required = false) String bookingId,
-                                           @RequestParam(required = false) String canceled) {
+    public ResponseEntity<String> zpReturn(@RequestParam(required=false) String bookingId,
+                                           @RequestParam(required=false) String canceled) {
         if (deeplinkBase == null || deeplinkBase.isBlank()) {
             return ResponseEntity.ok("Thiếu app.deeplink. Vui lòng mở lại ứng dụng.");
         }
@@ -276,133 +276,57 @@ public class ZaloPayController {
         String sep = deeplinkBase.contains("?") ? "&" : "?";
         String target = deeplinkBase + sep + "bookingId=" + bookingId;
 
-        if (canceled != null && !canceled.isEmpty()) {
+        if (canceled != null) {
             target += (target.contains("?") ? "&" : "?") + "canceled=1";
             String html = """
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>Thanh toán bị hủy</title>
-                </head>
-                <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f5f5f5;">
-                    <div style="text-align:center;padding:20px;background:white;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);">
-                        <h3>❌ Thanh toán đã bị hủy</h3>
-                        <p><a href="%s" style="color:#007bff;">Mở ứng dụng</a></p>
-                    </div>
-                </body>
-                </html>
-                """.formatted(target);
+            <!DOCTYPE html>
+            <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+            <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
+                <div style="text-align:center;padding:20px;background:white;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+                    <h3>Thanh toán đã bị hủy</h3>
+                    <p><a href="%s">Mở ứng dụng</a></p>
+                </div>
+            </body></html>
+            """.formatted(target);
             return ResponseEntity.ok().body(html);
         }
 
-        // CHECK STATUS VÀ REDIRECT
-        String statusCheckUrl = ensureNoTrailingSlash(publicBaseUrl) + "/api/payments/zalopay/status/" + bookingId;
-
+        // REDIRECT NGAY VỀ APP - app sẽ handle confirm
         String html = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Đang xử lý thanh toán...</title>
-                <script>
-                    async function checkStatus() {
-                        try {
-                            const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-                            const response = await fetch('%s', {
-                                method: 'GET',
-                                headers: {
-                                    'Authorization': token ? 'Bearer ' + token : '',
-                                    'Content-Type': 'application/json'
-                                }
-                            });
-                            
-                            if (response.ok) {
-                                const result = await response.json();
-                                if (result.status === 'CONFIRMED') {
-                                    window.location.href = '%s&status=SUCCESS';
-                                } else if (result.status === 'PENDING_PAYMENT') {
-                                    // Gọi confirm API
-                                    const confirmResponse = await fetch('%s/confirm', {
-                                        method: 'POST',
-                                        headers: {
-                                            'Authorization': token ? 'Bearer ' + token : '',
-                                            'Content-Type': 'application/json'
-                                        }
-                                    });
-                                    if (confirmResponse.ok) {
-                                        window.location.href = '%s&status=SUCCESS';
-                                    } else {
-                                        window.location.href = '%s&status=FAILED';
-                                    }
-                                } else {
-                                    window.location.href = '%s&status=FAILED';
-                                }
-                            } else {
-                                window.location.href = '%s&status=ERROR';
-                            }
-                        } catch (error) {
-                            console.error('Status check failed:', error);
-                            window.location.href = '%s&status=ERROR';
-                        }
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Xác nhận vé</title>
+            <meta http-equiv="refresh" content="1;url=%s">
+            <script>
+                // Fallback redirect
+                setTimeout(() => {
+                    if (!window.location.href.includes('myapp://')) {
+                        window.location.href = '%s';
                     }
-                    
-                    setTimeout(checkStatus, 500);
-                    setTimeout(() => window.location.href = '%s', 5000);
-                </script>
-                <style>
-                    body { 
-                        font-family: Arial, sans-serif; 
-                        display: flex; 
-                        justify-content: center; 
-                        align-items: center; 
-                        height: 100vh; 
-                        margin: 0; 
-                        background: #f5f5f5;
-                    }
-                    .container {
-                        text-align: center;
-                        padding: 20px;
-                        background: white;
-                        border-radius: 10px;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                    }
-                    .spinner {
-                        border: 4px solid #f3f3f3;
-                        border-top: 4px solid #007bff;
-                        border-radius: 50%;
-                        width: 40px;
-                        height: 40px;
-                        animation: spin 1s linear infinite;
-                        margin: 0 auto 20px;
-                    }
-                    @keyframes spin {
-                        0% { transform: rotate(0deg); }
-                        100% { transform: rotate(360deg); }
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="spinner"></div>
-                    <h3>Đang xử lý thanh toán...</h3>
-                    <p>Vui lòng chờ trong giây lát</p>
-                </div>
-            </body>
-            </html>
-            """.formatted(
-                statusCheckUrl,                    // %s 1: status check URL
-                target,                           // %s 2: success redirect
-                ensureNoTrailingSlash(publicBaseUrl) + "/api/bookings/" + bookingId,  // %s 3: confirm URL
-                target,                           // %s 4: success after confirm
-                target,                           // %s 5: failed redirect
-                target,                           // %s 6: failed
-                target,                           // %s 7: error
-                target,                           // %s 8: fallback
-                target                            // %s 9: final fallback
-        );
+                }, 1000);
+            </script>
+            <style>
+                body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+                .container { text-align: center; padding: 40px; background: rgba(255,255,255,0.1); border-radius: 20px; backdrop-filter: blur(10px); }
+                .icon { font-size: 48px; margin-bottom: 20px; }
+                .spinner { border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid white; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="spinner"></div>
+                <div class="icon">🎫</div>
+                <h2>Xác nhận vé</h2>
+                <p>Đang chuyển về ứng dụng...</p>
+                <p><small>Nếu không tự động chuyển, <a href="%s" style="color: #fff;">nhấn vào đây</a></small></p>
+            </div>
+        </body>
+        </html>
+        """.formatted(target, target, target);
 
         return ResponseEntity.ok().body(html);
     }
