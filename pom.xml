@@ -112,6 +112,11 @@
             <artifactId>jaxb-impl</artifactId>
             <version>2.3.0</version>
         </dependency>
+        <dependency>
+            <groupId>com.ntth</groupId>
+            <artifactId>spring-boot-heroku-cinema-app</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
     </dependencies>
 
     <build>

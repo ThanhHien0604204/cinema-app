@@ -4,6 +4,7 @@ import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
 import com.ntth.spring_boot_heroku_cinema_app.repository.TicketRepository;
 import com.ntth.spring_boot_heroku_cinema_app.service.TicketService;
+import com.ntth.spring_boot_heroku_cinema_app.service.ZaloPayService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,13 +30,16 @@ public class ZaloPayController {
     @Autowired
     private TicketRepository ticketRepo;
 
+    @Autowired
+    private ZaloPayService zaloPayService;
+
     @Value("${app.deeplink:}")
     private String deeplinkBase; // ví dụ: "myapp://zp-callback"
 
     @Value("${app.publicBaseUrl}")
     private String publicBaseUrl;
 
-    private static final Logger log = LoggerFactory.getLogger(TicketService.class);
+    private static final Logger log = LoggerFactory.getLogger(ZaloPayController.class);
 
     public ZaloPayController(TicketService bookingService) {
         this.ticketService = bookingService;
@@ -43,188 +47,258 @@ public class ZaloPayController {
 
     // 1) Tạo booking (ZaloPay) từ hold
     @PostMapping("/bookings/zalopay")
-    public ResponseEntity<?> createBookingFromHold(@RequestBody Map<String,String> body,
+    public ResponseEntity<?> createBookingFromHold(@RequestBody Map<String, Object> body,
                                                    @AuthenticationPrincipal JwtUser user) {
-        String holdId = body.get("holdId");
-        Ticket b = ticketService.createBookingZaloPay(holdId, user.getUserId());
-        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                "bookingId", b.getId(),
-                "bookingCode", b.getBookingCode(),
-                "status", b.getStatus(),
-                "amount", b.getAmount()
-        ));
+        try {
+            String holdId = (String) body.get("holdId");
+            if (holdId == null || holdId.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "MISSING_HOLD_ID"));
+            }
+
+            Ticket b = ticketService.createBookingZaloPay(holdId, user.getUserId());
+            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                    "bookingId", b.getId(),
+                    "bookingCode", b.getBookingCode(),
+                    "status", b.getStatus(),
+                    "amount", b.getAmount()
+            ));
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            log.error("Create ZaloPay booking failed", ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "INTERNAL_ERROR", "message", ex.getMessage()));
+        }
     }
 
     // 2) Tạo order URL để client mở
     @PostMapping("/payments/zalopay/create")
-    public ResponseEntity<?> createOrder(@RequestBody Map<String,String> body,
+    public ResponseEntity<?> createOrder(@RequestBody Map<String, Object> body,
                                          @AuthenticationPrincipal JwtUser user) {
-        String bookingId = body.get("bookingId");
-        String appUser = user.getUserId(); // hoặc email/phone
-        return ResponseEntity.ok(ticketService.createZpOrderLink(bookingId, appUser));
+        try {
+            String bookingId = (String) body.get("bookingId");
+            if (bookingId == null || bookingId.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "MISSING_BOOKING_ID"));
+            }
+
+            // Validate booking exists and belongs to user
+            Ticket booking = ticketRepo.findById(bookingId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+
+            if (!Objects.equals(booking.getUserId(), user.getUserId())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "NOT_YOUR_BOOKING");
+            }
+
+            if (!"PENDING_PAYMENT".equalsIgnoreCase(booking.getStatus())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_BOOKING_STATUS");
+            }
+
+            String appUser = user.getUserId(); // hoặc email/phone tùy config
+            Map<String, Object> orderResponse = zaloPayService.createOrder(booking, appUser);
+
+            return ResponseEntity.ok(Map.of(
+                    "orderUrl", orderResponse.get("order_url"),
+                    "zpTransToken", orderResponse.get("zp_trans_token"),
+                    "bookingId", bookingId
+            ));
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            log.error("Create ZaloPay order failed", ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "ORDER_CREATION_FAILED", "message", ex.getMessage()));
+        }
     }
 
     // 3) IPN callback từ ZaloPay (public)
     @PostMapping(value = "/payments/zalopay/ipn", consumes = MediaType.ALL_VALUE)
-    public ResponseEntity<Map<String, Object>> ipn(
-            @RequestParam Map<String, String> form,
-            @RequestBody(required = false) String body,
-            @RequestHeader(value = "Content-Type", required = false) String contentType
-    ) {
+    public ResponseEntity<?> ipn(@RequestBody Map<String, String> req) {
         try {
-            // Gom hết tham số vào 1 map (dùng cho TicketService.handleZpIpn như cũ)
-            Map<String, String> params = new HashMap<>();
-            if (form != null) params.putAll(form);
+            String data = req.get("data");
+            String mac = req.get("mac");
 
-            // 1) Nếu form rỗng mà có body, thử parse theo content-type
-            if ((params.isEmpty() || !params.containsKey("data")) && body != null && !body.isBlank()) {
-                if (contentType != null && contentType.toLowerCase().contains("application/json")) {
-                    var om = new com.fasterxml.jackson.databind.ObjectMapper();
-                    Map<String,Object> json = om.readValue(body, new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
-                    if (json.get("data") != null) params.put("data", String.valueOf(json.get("data")));
-                    if (json.get("mac")  != null) params.put("mac",  String.valueOf(json.get("mac")));
-                } else {
-                    for (String p : body.split("&")) {
-                        int i = p.indexOf('=');
-                        if (i > 0) {
-                            String k = java.net.URLDecoder.decode(p.substring(0,i), java.nio.charset.StandardCharsets.UTF_8);
-                            String v = java.net.URLDecoder.decode(p.substring(i+1), java.nio.charset.StandardCharsets.UTF_8);
-                            params.put(k, v);
-                        }
-                    }
-                }
+            if (data == null || mac == null) {
+                log.warn("IPN missing data or mac");
+                return ResponseEntity.ok(Map.of("return_code", 1, "return_message", "missing_params"));
             }
 
-            // 2) Lấy bookingId từ embed_data bên trong "data" nếu có, rồi NHÉT vào params
-            try {
-                String data = params.get("data");
-                if (data != null) {
-                    var om = new com.fasterxml.jackson.databind.ObjectMapper();
-                    Map<String,Object> dataJson = om.readValue(data, new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
-                    Object embedObj = dataJson.get("embed_data");
-                    Map<String,Object> embed = null;
-                    if (embedObj instanceof String) {
-                        embed = om.readValue((String) embedObj, new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
-                    } else if (embedObj instanceof Map) {
-                        embed = (Map<String, Object>) embedObj;
-                    }
-                    if (embed != null && embed.get("bookingId") != null && !params.containsKey("bookingId")) {
-                        params.put("bookingId", String.valueOf(embed.get("bookingId")));
-                    }
-                }
-            } catch (Exception ignore) {
-                // Không chặn flow nếu parse embed_data lỗi — service có thể tự xử lý
-            }
+            ticketService.handleZpIpn(req);
+            log.info("IPN processed successfully for appTransId={}", req.get("app_trans_id"));
 
-            // 3) Gọi service cũ, giữ nguyên logic bên trong của bạn
-            ticketService.handleZpIpn(params);
-
-            // 4) ZaloPay cần return_code=1 để biết bạn đã nhận thành công
             return ResponseEntity.ok(Map.of("return_code", 1, "return_message", "success"));
         } catch (Exception e) {
-            // Vẫn trả 1 để ZP không spam retry (tuỳ chính sách của bạn)
+            log.error("IPN processing failed", e);
+            // ZaloPay yêu cầu return_code=1 dù có error
             return ResponseEntity.ok(Map.of("return_code", 1, "return_message", "error"));
         }
     }
 
+    // 4) API cho app gọi để confirm booking khi quay về từ ZaloPay
+    @PostMapping("/bookings/{bookingId}/confirm")
+    public ResponseEntity<?> confirmBooking(@PathVariable String bookingId,
+                                            @RequestBody(required = false) Map<String, Object> body,
+                                            @AuthenticationPrincipal JwtUser user) {
 
-    //dùng để dựng URL quay về ứng dụng sau khi thanh toán xong
-//    @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
-//    public ResponseEntity<String> zpReturn(@RequestParam(required=false) String bookingId,
-//                                           @RequestParam(required=false) String canceled) {
-//        if (deeplinkBase == null || deeplinkBase.isBlank()) {
-//            return ResponseEntity.ok("<html><body>Thiếu app.deeplink. Vui lòng mở lại ứng dụng.</body></html>");
-//        }
-//        String sep = deeplinkBase.contains("?") ? "&" : "?";
-//        String target = deeplinkBase + (bookingId!=null? sep+"bookingId="+bookingId : "");
-//        if (canceled!=null) target += (target.contains("?")?"&":"?") + "canceled=1";
-//        String html = "<!doctype html><meta http-equiv='refresh' content='0;url="+target+"'>" +
-//                "<a href='"+target+"'>Mở ứng dụng</a>";
-//        return ResponseEntity.ok(html);
-//    }
+        log.info("Confirm booking request: bookingId={}, userId={}", bookingId,
+                user != null ? user.getUserId() : "anonymous");
 
-    // 4) Hủy vé + refund (ADMIN hoặc chủ vé, tùy policy)
-    @PostMapping("/bookings/{id}/cancel")
-    public ResponseEntity<?> cancel(@PathVariable String id, @RequestBody(required = false) Map<String,String> body) {
-        String reason = (body == null) ? "" : body.getOrDefault("reason", "");
-        Ticket b = ticketService.cancelBooking(id, reason);
-        return ResponseEntity.ok(Map.of(
-                "bookingId", b.getId(),
-                "status", b.getStatus()
-        ));
+        try {
+            if (user == null || user.getUserId() == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "UNAUTHORIZED", "message", "Please login"));
+            }
+
+            // Gọi service để CONFIRM (ticket, seats, delete lock)
+            Ticket confirmed = ticketService.confirmBookingFromPending(bookingId, user.getUserId());
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("bookingId", confirmed.getId());
+            result.put("bookingCode", confirmed.getBookingCode());
+            result.put("status", confirmed.getStatus()); // CONFIRMED
+            result.put("seats", confirmed.getSeats());
+            result.put("showtimeId", confirmed.getShowtimeId());
+            result.put("amount", confirmed.getAmount());
+            result.put("message", "Vé đã được xác nhận thành công!");
+
+            log.info("Booking confirmed successfully: bookingId={}, code={}, user={}",
+                    bookingId, confirmed.getBookingCode(), user.getUserId());
+
+            return ResponseEntity.ok(result);
+
+        } catch (ResponseStatusException ex) {
+            log.warn("Confirm failed with status {}: {}", ex.getStatusCode(), ex.getReason());
+            Map<String, Object> error = Map.of(
+                    "success", false,
+                    "error", ex.getReason(),
+                    "statusCode", ex.getStatusCode().value()
+            );
+            return ResponseEntity.status(ex.getStatusCode()).body(error);
+        } catch (Exception ex) {
+            log.error("Unexpected error confirming booking {}: {}", bookingId, ex.getMessage(), ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "error", "INTERNAL_ERROR", "message", ex.getMessage()));
+        }
     }
 
-    /**
-     * 4.1) API cho app gọi ngay khi quay về từ ZaloPay để kiểm tra trạng thái
-     * Thay vì poll /api/bookings/{id}, endpoint này xử lý nhanh hơn
-     */
+    // 4.1) API cho app gọi ngay khi quay về từ ZaloPay để kiểm tra trạng thái
     @GetMapping("/payments/zalopay/status/{bookingId}")
     public ResponseEntity<Map<String, Object>> checkPaymentStatus(
             @PathVariable String bookingId,
             @AuthenticationPrincipal JwtUser user) {
 
-        Ticket b = ticketRepo.findById(bookingId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+        try {
+            Ticket b = ticketRepo.findById(bookingId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        // Kiểm tra quyền sở hữu
-        boolean isAdmin = user != null && "ADMIN".equalsIgnoreCase(user.getRole());
-        if (!isAdmin && b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("bookingId", b.getId());
-        result.put("bookingCode", b.getBookingCode());
-
-        // THAY ĐỔI: CẢ CONFIRMED VÀ PENDING_PAYMENT ĐỀU TRẢ "SUCCESS"
-        String displayStatus = "PENDING_PAYMENT".equalsIgnoreCase(b.getStatus()) ||
-                "CONFIRMED".equalsIgnoreCase(b.getStatus()) ?
-                "SUCCESS" : b.getStatus().toUpperCase();
-
-        result.put("status", displayStatus);
-
-        // Nếu SUCCESS (CONFIRMED hoặc PENDING_PAYMENT), trả thêm info
-        if ("SUCCESS".equalsIgnoreCase(displayStatus)) {
-            result.put("seats", b.getSeats());
-            result.put("showtimeId", b.getShowtimeId());
-            try {
-                result.put("amount", b.getAmount());
-            } catch (Throwable ignore) {}
-
-            // Thêm payment info
-            if (b.getPayment() != null) {
-                Map<String, Object> payment = new LinkedHashMap<>();
-                payment.put("gateway", b.getPayment().getGateway());
-                if (b.getPayment().getTxId() != null) {
-                    payment.put("txId", b.getPayment().getTxId());
-                }
-                result.put("payment", payment);
+            // Kiểm tra quyền sở hữu
+            boolean isAdmin = user != null && "ADMIN".equalsIgnoreCase(user.getRole());
+            if (!isAdmin && b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
             }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("bookingId", b.getId());
+            result.put("bookingCode", b.getBookingCode());
+            result.put("status", b.getStatus());
+
+            // THÊM LOGIC CHO PAYMENT STATUS
+            Ticket.PaymentInfo pay = b.getPayment();
+            if (pay != null) {
+                Map<String, Object> paymentInfo = new LinkedHashMap<>();
+                paymentInfo.put("gateway", pay.getGateway());
+                if (pay.getTxId() != null) {
+                    paymentInfo.put("txId", pay.getTxId());
+                }
+                if (pay.getPaidAt() != null) {
+                    paymentInfo.put("paidAt", pay.getPaidAt().toString());
+                }
+                result.put("payment", paymentInfo);
+            }
+
+            // Nếu đã CONFIRMED, trả thêm thông tin ghế
+            if ("CONFIRMED".equalsIgnoreCase(b.getStatus())) {
+                result.put("seats", b.getSeats());
+                result.put("showtimeId", b.getShowtimeId());
+                result.put("amount", b.getAmount());
+            }
+
+            return ResponseEntity.ok(result);
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            log.error("Check payment status failed for bookingId={}", bookingId, ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "STATUS_CHECK_FAILED", "message", ex.getMessage()));
         }
-
-        log.info("Status check - bookingId={}, internalStatus={}, displayStatus={}",
-                bookingId, b.getStatus(), displayStatus);
-
-        return ResponseEntity.ok(result);
     }
 
-    // 5) Cập nhật zpReturn để gọi status check
+    // 5) Hủy vé + refund (ADMIN hoặc chủ vé, tùy policy)
+    @PostMapping("/bookings/{id}/cancel")
+    public ResponseEntity<?> cancel(@PathVariable String id,
+                                    @RequestBody(required = false) Map<String, Object> body,
+                                    @AuthenticationPrincipal JwtUser user) {
+        try {
+            String reason = body != null ? (String) body.getOrDefault("reason", "") : "";
+
+            // Check ownership
+            Ticket b = ticketRepo.findById(id)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+
+            boolean isAdmin = user != null && "ADMIN".equalsIgnoreCase(user.getRole());
+            if (!isAdmin && b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "NOT_YOUR_BOOKING");
+            }
+
+            Ticket canceled = ticketService.cancelBooking(id, reason);
+            return ResponseEntity.ok(Map.of(
+                    "bookingId", canceled.getId(),
+                    "status", canceled.getStatus(),
+                    "message", "Booking canceled successfully"
+            ));
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            log.error("Cancel booking failed for id={}", id, ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "CANCEL_FAILED", "message", ex.getMessage()));
+        }
+    }
+
+    // 6) Cập nhật zpReturn để gọi status check
     @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<String> zpReturn(@RequestParam(required=false) String bookingId,
-                                           @RequestParam(required=false) String canceled) {
+    public ResponseEntity<String> zpReturn(@RequestParam(required = false) String bookingId,
+                                           @RequestParam(required = false) String canceled) {
         if (deeplinkBase == null || deeplinkBase.isBlank()) {
             return ResponseEntity.ok("Thiếu app.deeplink. Vui lòng mở lại ứng dụng.");
         }
 
         String sep = deeplinkBase.contains("?") ? "&" : "?";
         String target = deeplinkBase + sep + "bookingId=" + bookingId;
-        if (canceled != null) {
+
+        if (canceled != null && !canceled.isEmpty()) {
             target += (target.contains("?") ? "&" : "?") + "canceled=1";
+            String html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Thanh toán bị hủy</title>
+                </head>
+                <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f5f5f5;">
+                    <div style="text-align:center;padding:20px;background:white;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+                        <h3>❌ Thanh toán đã bị hủy</h3>
+                        <p><a href="%s" style="color:#007bff;">Mở ứng dụng</a></p>
+                    </div>
+                </body>
+                </html>
+                """.formatted(target);
+            return ResponseEntity.ok().body(html);
         }
 
-        // THÊM GỌI STATUS CHECK TRƯỚC KHI QUAY VỀ APP
-        String statusCheckUrl = ensureNoTrailingSlash(publicBaseUrl) +
-                "/api/payments/zalopay/status/" + bookingId;
+        // CHECK STATUS VÀ REDIRECT
+        String statusCheckUrl = ensureNoTrailingSlash(publicBaseUrl) + "/api/payments/zalopay/status/" + bookingId;
 
         String html = """
             <!DOCTYPE html>
@@ -234,13 +308,13 @@ public class ZaloPayController {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Đang xử lý thanh toán...</title>
                 <script>
-                    // 1. Gọi API kiểm tra trạng thái ngay lập tức
                     async function checkStatus() {
                         try {
+                            const token = localStorage.getItem('token') || sessionStorage.getItem('token');
                             const response = await fetch('%s', {
                                 method: 'GET',
                                 headers: {
-                                    'Authorization': localStorage.getItem('token') || sessionStorage.getItem('token'),
+                                    'Authorization': token ? 'Bearer ' + token : '',
                                     'Content-Type': 'application/json'
                                 }
                             });
@@ -248,14 +322,25 @@ public class ZaloPayController {
                             if (response.ok) {
                                 const result = await response.json();
                                 if (result.status === 'CONFIRMED') {
-                                    // Thành công - redirect về app với thông tin
-                                    window.location.href = '%s&status=CONFIRMED';
+                                    window.location.href = '%s&status=SUCCESS';
+                                } else if (result.status === 'PENDING_PAYMENT') {
+                                    // Gọi confirm API
+                                    const confirmResponse = await fetch('%s/confirm', {
+                                        method: 'POST',
+                                        headers: {
+                                            'Authorization': token ? 'Bearer ' + token : '',
+                                            'Content-Type': 'application/json'
+                                        }
+                                    });
+                                    if (confirmResponse.ok) {
+                                        window.location.href = '%s&status=SUCCESS';
+                                    } else {
+                                        window.location.href = '%s&status=FAILED';
+                                    }
                                 } else {
-                                    // Lỗi - redirect với thông tin lỗi
                                     window.location.href = '%s&status=FAILED';
                                 }
                             } else {
-                                // Network error hoặc 4xx/5xx
                                 window.location.href = '%s&status=ERROR';
                             }
                         } catch (error) {
@@ -264,13 +349,8 @@ public class ZaloPayController {
                         }
                     }
                     
-                    // Tự động check sau 500ms để đảm bảo IPN đã xử lý xong
                     setTimeout(checkStatus, 500);
-                    
-                    // Fallback sau 5s nếu không redirect được
-                    setTimeout(() => {
-                        window.location.href = '%s';
-                    }, 5000);
+                    setTimeout(() => window.location.href = '%s', 5000);
                 </script>
                 <style>
                     body { 
@@ -315,16 +395,19 @@ public class ZaloPayController {
             """.formatted(
                 statusCheckUrl,                    // %s 1: status check URL
                 target,                           // %s 2: success redirect
-                target,                           // %s 3: failed redirect
-                target,                           // %s 4: error redirect
-                target,                           // %s 5: network error redirect
-                target                            // %s 6: fallback redirect
+                ensureNoTrailingSlash(publicBaseUrl) + "/api/bookings/" + bookingId,  // %s 3: confirm URL
+                target,                           // %s 4: success after confirm
+                target,                           // %s 5: failed redirect
+                target,                           // %s 6: failed
+                target,                           // %s 7: error
+                target,                           // %s 8: fallback
+                target                            // %s 9: final fallback
         );
 
         return ResponseEntity.ok().body(html);
     }
 
-    // Helper method (thêm vào cuối class)
+    // Helper method
     private String ensureNoTrailingSlash(String base) {
         if (base == null) return "";
         return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
