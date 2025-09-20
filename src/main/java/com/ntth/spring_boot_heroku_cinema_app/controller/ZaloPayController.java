@@ -113,26 +113,30 @@ public class ZaloPayController {
     // 3) IPN callback từ ZaloPay (public)
     @PostMapping(value = "/payments/zalopay/ipn", consumes = MediaType.ALL_VALUE)
     public ResponseEntity<?> ipn(@RequestBody Map<String, String> req) {
+        log.info("=== ZALOPAY IPN RECEIVED ===");
+        log.info("Request data: {}", req);
+
         try {
             String data = req.get("data");
             String mac = req.get("mac");
 
             if (data == null || mac == null) {
-                log.warn("IPN missing data or mac");
+                log.warn("IPN missing data or mac: {}", req);
                 return ResponseEntity.ok(Map.of("return_code", 1, "return_message", "missing_params"));
             }
 
+            // GỌI SERVICE XỬ LÝ
             ticketService.handleZpIpn(req);
-            log.info("IPN processed successfully for appTransId={}", req.get("app_trans_id"));
 
+            log.info("IPN PROCESSED SUCCESSFULLY: appTransId={}", req.get("app_trans_id"));
             return ResponseEntity.ok(Map.of("return_code", 1, "return_message", "success"));
+
         } catch (Exception e) {
-            log.error("IPN processing failed", e);
-            // ZaloPay yêu cầu return_code=1 dù có error
-            return ResponseEntity.ok(Map.of("return_code", 1, "return_message", "error"));
+            log.error("IPN PROCESSING FAILED", e);
+            // ZALOPAY YÊU CẦU RETURN_CODE=1 DÙ CÓ ERROR
+            return ResponseEntity.ok(Map.of("return_code", 1, "return_message", "error: " + e.getMessage()));
         }
     }
-
     // 4) API cho app gọi để confirm booking khi quay về từ ZaloPay
     @PostMapping("/bookings/{bookingId}/confirm")
     public ResponseEntity<?> confirmBooking(@PathVariable String bookingId,

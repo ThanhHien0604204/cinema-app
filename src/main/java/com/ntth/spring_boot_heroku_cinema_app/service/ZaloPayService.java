@@ -150,19 +150,22 @@ public class ZaloPayService {
     private String createEmbedData(Ticket b) {
         Map<String, String> embed = new LinkedHashMap<>();
 
-        // SUCCESS: Quay về app với bookingId
-        String successUrl = deeplinkBase + "?bookingId=" + b.getId();
-        embed.put("redirecturl", successUrl);  // QUAN TRỌNG: ZaloPay dùng field này
+        // SUCCESS DEEP LINK
+        String successUrl = deeplinkBase + "?bookingId=" + b.getId() + "&status=SUCCESS";
+        embed.put("redirecturl", successUrl);  // ZALOPAY DÙNG FIELD NÀY
 
-        // CANCEL URL
+        // CANCEL DEEP LINK
         String cancelUrl = deeplinkBase + "?bookingId=" + b.getId() + "&canceled=1";
         embed.put("cancelurl", cancelUrl);
 
-        // FALLBACK WEB URL (nếu deep link fail)
-        String webSuccessUrl = publicBaseUrl + "/api/payments/zalopay/return?bookingId=" + b.getId();
-        embed.put("web_redirect_url", webSuccessUrl);
+        // WEB FALLBACK URL
+        String webRedirectUrl = publicBaseUrl + "/api/payments/zalopay/return?bookingId=" + b.getId();
+        embed.put("web_redirect_url", webRedirectUrl);
 
-        return toJson(embed);
+        String jsonEmbed = toJson(embed);
+        log.info("Embed data for booking {}: {}", b.getId(), jsonEmbed);
+
+        return jsonEmbed;
     }
     /** Refund (sandbox/prod). amount phải <= amount đã thanh toán */
     public Map<String, Object> refund(String zpTransId, long amount, String description) {
