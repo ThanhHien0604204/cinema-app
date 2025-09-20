@@ -59,69 +59,45 @@ public class ZaloPayService {
     public Map<String, Object> createOrder(Ticket b, String appUser) {
         URI endpoint = absoluteHttpUrl(createUrl);
 
-        String appTransId = YYMMDD.format(LocalDate.now()) + "_" + b.getBookingCode();
+        // APP TRANS ID: Format yyyyMMdd_BOOKING_CODE
+        String appTransId = LocalDate.now().format(YYMMDD) + "_" + b.getBookingCode();
 
-        Map<String, Object> embed = new LinkedHashMap<>();
+        // REQUEST BODY
+        Map<String, Object> req = new LinkedHashMap<>();
+        req.put("app_id", appId);
+        req.put("app_trans_id", appTransId);
+        req.put("app_user", appUser);  // User ID hoặc email
+        req.put("app_time", System.currentTimeMillis());  // Timestamp
+        req.put("amount", b.getAmount());  // SỐ TIỀN (KHÔNG CÓ DẤU PHẨY)
+        req.put("item", "ticket_" + b.getBookingCode());  // Mô tả
+        req.put("embed_data", createEmbedData(b));  // THÊM NÀY - QUAN TRỌNG
+        req.put("description", "Thanh toán vé xem phim - " + b.getBookingCode());
 
-        String redirect;
-        if (deeplinkBase != null && !deeplinkBase.isBlank()) {
-            String sep = deeplinkBase.contains("?") ? "&" : "?";
-            redirect = deeplinkBase + sep + "bookingId=" + b.getId();
-        } else {
-            redirect = ensureNoTrailingSlash(publicBaseUrl)
-                    + "/api/payments/zalopay/return?bookingId=" + b.getId();
-        }
-        String cancel = redirect + (redirect.contains("?") ? "&" : "?") + "canceled=1";
+        // MAC SECURITY
+        String macData = String.format("%d|%s|%s|%d|%d|%s|%s|%s",
+                appId, appTransId, appUser, System.currentTimeMillis(),
+                b.getAmount(), "ticket_" + b.getBookingCode(),
+                createEmbedData(b), "Thanh toán vé xem phim - " + b.getBookingCode());
 
-        //embed.put("redirecturl", ensureNoTrailingSlash(publicBaseUrl) + "/payments/zalopay/return");
-        embed.put("redirecturl", redirect);
-        embed.put("cancelurl",   cancel);
-        embed.put("bookingId",   b.getId());
-        embed.put("bookingCode", b.getBookingCode());
-        embed.put("merchantinfo", "bookingId=" + b.getId());
-        String embedData = toJson(embed);
+        req.put("mac", hmacSHA256Hex(key1, macData));
 
-        long appTime = System.currentTimeMillis();
-        String amountStr = String.valueOf(b.getAmount());
-
-        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-        form.add("app_id", String.valueOf(appId));
-        form.add("app_user", appUser);
-        form.add("app_time", String.valueOf(appTime));
-        form.add("amount", amountStr);
-        form.add("app_trans_id", appTransId);
-        form.add("embed_data", embedData);
-        form.add("item", "[]");
-        form.add("description", "Pay for booking " + b.getBookingCode());
-        form.add("callback_url", ipnCallbackUrl);
-
-        // MAC: HMAC_SHA256(key1, app_id|app_trans_id|app_user|amount|app_time|embed_data|item)
-        String dataMac = String.join("|",
-                form.getFirst("app_id"),
-                form.getFirst("app_trans_id"),
-                form.getFirst("app_user"),
-                form.getFirst("amount"),
-                form.getFirst("app_time"),
-                form.getFirst("embed_data"),
-                form.getFirst("item")
-        );
-        String mac = hmacSHA256Hex(key1, dataMac);
-        form.add("mac", mac);
+        log.info("ZaloPay create order request: {}", req);
 
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        headers.setContentType(MediaType.APPLICATION_JSON);
 
-        ResponseEntity<Map> res = restTemplate.postForEntity(endpoint, new HttpEntity<>(form, headers), Map.class);
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(req, headers);
+        ResponseEntity<Map> res = restTemplate.postForEntity(endpoint, entity, Map.class);
+
         if (!res.getStatusCode().is2xxSuccessful() || res.getBody() == null) {
+            log.error("ZaloPay create order failed: {}", res.getBody());
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ZP_CREATE_ORDER_FAILED");
         }
 
-        Map<String, Object> body = castToMap(res.getBody());
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("order_url", body.get("order_url"));
-        out.put("zp_trans_token", body.get("zp_trans_token"));
-        out.put("app_trans_id", appTransId);
-        return out;
+        Map<String, Object> response = castToMap(res.getBody());
+        log.info("ZaloPay create order success: {}", response);
+
+        return response;
     }
 
     /** Xác minh IPN: data & mac (key2). Return {return_code, return_message, parsed?} */
@@ -145,25 +121,32 @@ public class ZaloPayService {
         return out;
     }
     /**
-     * Tạo embed_data chứa redirect URLs
+     * Tạo embed_data đúng format ZaloPay
      */
     private String createEmbedData(Ticket b) {
-        Map<String, String> embed = new LinkedHashMap<>();
+        // ZALOPAY YÊU CẦU FORMAT ĐÚNG
+        Map<String, String> embedData = new LinkedHashMap<>();
 
-        // SUCCESS DEEP LINK
-        String successUrl = deeplinkBase + "?bookingId=" + b.getId() + "&status=SUCCESS";
-        embed.put("redirecturl", successUrl);  // ZALOPAY DÙNG FIELD NÀY
+        // REQUIRED: redirecturl - URL quay về sau khi pay (web hoặc deep link)
+        String redirectUrl = publicBaseUrl + "/api/payments/zalopay/return?bookingId=" + b.getId();
+        embedData.put("redirecturl", redirectUrl);  // QUAN TRỌNG: Phải là HTTPS
 
-        // CANCEL DEEP LINK
-        String cancelUrl = deeplinkBase + "?bookingId=" + b.getId() + "&canceled=1";
-        embed.put("cancelurl", cancelUrl);
+        // OPTIONAL: cancelurl
+        String cancelUrl = publicBaseUrl + "/api/payments/zalopay/return?bookingId=" + b.getId() + "&canceled=1";
+        embedData.put("cancelurl", cancelUrl);
 
-        // WEB FALLBACK URL
-        String webRedirectUrl = publicBaseUrl + "/api/payments/zalopay/return?bookingId=" + b.getId();
-        embed.put("web_redirect_url", webRedirectUrl);
+        // ADDITIONAL: Thông tin booking để debug
+        embedData.put("bookingId", b.getId());
+        embedData.put("bookingCode", b.getBookingCode());
+        embedData.put("amount", String.valueOf(b.getAmount()));
 
-        String jsonEmbed = toJson(embed);
-        log.info("Embed data for booking {}: {}", b.getId(), jsonEmbed);
+        // CINEMA INFO (nếu ZaloPay yêu cầu)
+        if (b.getShowtimeId() != null) {
+            embedData.put("showtimeId", b.getShowtimeId());
+        }
+
+        String jsonEmbed = toJson(embedData);
+        log.info("ZaloPay embed_data for booking {}: {}", b.getId(), jsonEmbed);
 
         return jsonEmbed;
     }

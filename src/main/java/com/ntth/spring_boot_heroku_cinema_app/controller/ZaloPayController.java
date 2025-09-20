@@ -81,7 +81,7 @@ public class ZaloPayController {
                 return ResponseEntity.badRequest().body(Map.of("error", "MISSING_BOOKING_ID"));
             }
 
-            // Validate booking exists and belongs to user
+            // Validate booking
             Ticket booking = ticketRepo.findById(bookingId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
@@ -93,14 +93,19 @@ public class ZaloPayController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_BOOKING_STATUS");
             }
 
-            String appUser = user.getUserId(); // hoặc email/phone tùy config
+            String appUser = user.getUserId();
             Map<String, Object> orderResponse = zaloPayService.createOrder(booking, appUser);
 
-            return ResponseEntity.ok(Map.of(
-                    "orderUrl", orderResponse.get("order_url"),
-                    "zpTransToken", orderResponse.get("zp_trans_token"),
-                    "bookingId", bookingId
-            ));
+            // TRẢ RESPONSE ĐÚNG FORMAT CHO FRONTEND
+            Map<String, Object> response = new HashMap<>();
+            response.put("orderUrl", orderResponse.get("order_url"));
+            response.put("zpTransToken", orderResponse.get("zp_trans_token"));
+            response.put("bookingId", bookingId);
+
+            log.info("ZaloPay order created for booking {}: {}", bookingId, response);
+
+            return ResponseEntity.ok(response);
+
         } catch (ResponseStatusException ex) {
             throw ex;
         } catch (Exception ex) {
