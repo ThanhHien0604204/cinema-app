@@ -4,6 +4,8 @@ import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
 import com.ntth.spring_boot_heroku_cinema_app.repository.TicketRepository;
 import com.ntth.spring_boot_heroku_cinema_app.service.TicketService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -33,6 +35,7 @@ public class ZaloPayController {
     @Value("${app.publicBaseUrl}")
     private String publicBaseUrl;
 
+    private static final Logger log = LoggerFactory.getLogger(TicketService.class);
 
     public ZaloPayController(TicketService bookingService) {
         this.ticketService = bookingService;
@@ -171,17 +174,36 @@ public class ZaloPayController {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("bookingId", b.getId());
-        result.put("status", b.getStatus());
         result.put("bookingCode", b.getBookingCode());
 
-        // Nếu đã CONFIRMED, trả thêm thông tin ghế
-        if ("CONFIRMED".equalsIgnoreCase(b.getStatus())) {
+        // THAY ĐỔI: CẢ CONFIRMED VÀ PENDING_PAYMENT ĐỀU TRẢ "SUCCESS"
+        String displayStatus = "PENDING_PAYMENT".equalsIgnoreCase(b.getStatus()) ||
+                "CONFIRMED".equalsIgnoreCase(b.getStatus()) ?
+                "SUCCESS" : b.getStatus().toUpperCase();
+
+        result.put("status", displayStatus);
+
+        // Nếu SUCCESS (CONFIRMED hoặc PENDING_PAYMENT), trả thêm info
+        if ("SUCCESS".equalsIgnoreCase(displayStatus)) {
             result.put("seats", b.getSeats());
             result.put("showtimeId", b.getShowtimeId());
             try {
                 result.put("amount", b.getAmount());
             } catch (Throwable ignore) {}
+
+            // Thêm payment info
+            if (b.getPayment() != null) {
+                Map<String, Object> payment = new LinkedHashMap<>();
+                payment.put("gateway", b.getPayment().getGateway());
+                if (b.getPayment().getTxId() != null) {
+                    payment.put("txId", b.getPayment().getTxId());
+                }
+                result.put("payment", payment);
+            }
         }
+
+        log.info("Status check - bookingId={}, internalStatus={}, displayStatus={}",
+                bookingId, b.getStatus(), displayStatus);
 
         return ResponseEntity.ok(result);
     }

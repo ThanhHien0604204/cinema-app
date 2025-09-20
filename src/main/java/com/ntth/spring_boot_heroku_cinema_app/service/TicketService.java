@@ -27,6 +27,7 @@ public class TicketService {
     private final SeatLedgerRepository ledgerRepo;
     private final ZaloPayService zalo;
     private final MongoTemplate mongo;
+    private static final Logger log = LoggerFactory.getLogger(TicketService.class);
 
     public TicketService(SeatLockRepository lockRepo,
                          TicketRepository bookingRepo,
@@ -163,6 +164,7 @@ public class TicketService {
         pay.setRaw(parsed);
 
         // -------- 3) Đọc status/amount từ IPN -------- (giữ nguyên)
+        // Đọc status từ IPN ZaloPay
         int statusFromZp = safeInt(parsed.get("status"), -1);
         long amountFromZp = 0L;
         Object amountObj = parsed.get("amount");
@@ -184,12 +186,12 @@ public class TicketService {
         }
 
         // -------- 5) THAY ĐỔI LOGIC: status=0 hoặc 1 đều CONFIRMED ngay --------
+        // THAY ĐỔI LOGIC: CẢ 0 (PENDING) VÀ 1 (SUCCESS) ĐỀU CONFIRMED NGAY
         if (statusFromZp == 0 || statusFromZp == 1) {
-            // CẢ PENDING VÀ SUCCESS ĐỀU CONFIRMED NGAY LẬP TỨC
             if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
+                // CẢ PENDING VÀ SUCCESS ĐỀU CONFIRMED NGAY LẬP TỨC
                 b.setStatus("CONFIRMED");
                 pay.setPaidAt(Instant.now());
-                ticketRepo.save(b);
 
                 // Confirm ghế trong ledger
                 long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
@@ -198,12 +200,23 @@ public class TicketService {
                 }
 
                 // Xóa hold
-                try { lockRepo.deleteById(b.getHoldId()); } catch (Throwable ignore) {}
+                try {
+                    lockRepo.deleteById(b.getHoldId());
+                } catch (Throwable ignore) {
+                    log.warn("Failed to delete hold: {}", b.getHoldId(), ignore);
+                }
 
-                log.info("IPN CONFIRMED: bookingId={}, statusFromZp={}, holdId={}, seats={}",
-                        b.getId(), statusFromZp, b.getHoldId(), b.getSeats());
+                ticketRepo.save(b);
+                log.info("IPN CONFIRMED (status={}): bookingId={}, holdId={}, seats={}",
+                        statusFromZp, b.getId(), b.getHoldId(), b.getSeats());
             }
             return;
+        }
+        // Status 2, 3, ... coi như fail
+        if (!"CANCELED".equalsIgnoreCase(b.getStatus())) {
+            b.setStatus("CANCELED");
+            ticketRepo.save(b);
+            log.warn("IPN FAILED (status={}): bookingId={} -> CANCELED", statusFromZp, b.getId());
         }
 
         // Các status còn lại (2, 3, ...) coi như fail
@@ -214,12 +227,14 @@ public class TicketService {
         log.debug("IPN not success (status={}) booking={} -> CANCELED", statusFromZp, bookingCode);
     }
 
-    private int safeInt(Object o, int def) {
-        if (o instanceof Number) return ((Number) o).intValue();
-        if (o != null) {
-            try { return Integer.parseInt(String.valueOf(o)); } catch (Exception ignore) {}
+    private int safeInt(Object obj, int defaultValue) {
+        if (obj == null) return defaultValue;
+        if (obj instanceof Number) return ((Number) obj).intValue();
+        try {
+            return Integer.parseInt(String.valueOf(obj));
+        } catch (NumberFormatException e) {
+            return defaultValue;
         }
-        return def;
     }
 
     @Transactional
