@@ -2,24 +2,37 @@ package com.ntth.spring_boot_heroku_cinema_app.controller;
 
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
+import com.ntth.spring_boot_heroku_cinema_app.repository.TicketRepository;
 import com.ntth.spring_boot_heroku_cinema_app.service.TicketService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api")
 public class ZaloPayController {
-    private final TicketService ticketService;
+    @Autowired
+    private TicketService ticketService;
+
+    @Autowired
+    private TicketRepository ticketRepo;
 
     @Value("${app.deeplink:}")
     private String deeplinkBase; // ví dụ: "myapp://zp-callback"
+
+    @Value("${app.publicBaseUrl}")
+    private String publicBaseUrl;
+
 
     public ZaloPayController(TicketService bookingService) {
         this.ticketService = bookingService;
@@ -113,19 +126,19 @@ public class ZaloPayController {
 
 
     //dùng để dựng URL quay về ứng dụng sau khi thanh toán xong
-    @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<String> zpReturn(@RequestParam(required=false) String bookingId,
-                                           @RequestParam(required=false) String canceled) {
-        if (deeplinkBase == null || deeplinkBase.isBlank()) {
-            return ResponseEntity.ok("<html><body>Thiếu app.deeplink. Vui lòng mở lại ứng dụng.</body></html>");
-        }
-        String sep = deeplinkBase.contains("?") ? "&" : "?";
-        String target = deeplinkBase + (bookingId!=null? sep+"bookingId="+bookingId : "");
-        if (canceled!=null) target += (target.contains("?")?"&":"?") + "canceled=1";
-        String html = "<!doctype html><meta http-equiv='refresh' content='0;url="+target+"'>" +
-                "<a href='"+target+"'>Mở ứng dụng</a>";
-        return ResponseEntity.ok(html);
-    }
+//    @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
+//    public ResponseEntity<String> zpReturn(@RequestParam(required=false) String bookingId,
+//                                           @RequestParam(required=false) String canceled) {
+//        if (deeplinkBase == null || deeplinkBase.isBlank()) {
+//            return ResponseEntity.ok("<html><body>Thiếu app.deeplink. Vui lòng mở lại ứng dụng.</body></html>");
+//        }
+//        String sep = deeplinkBase.contains("?") ? "&" : "?";
+//        String target = deeplinkBase + (bookingId!=null? sep+"bookingId="+bookingId : "");
+//        if (canceled!=null) target += (target.contains("?")?"&":"?") + "canceled=1";
+//        String html = "<!doctype html><meta http-equiv='refresh' content='0;url="+target+"'>" +
+//                "<a href='"+target+"'>Mở ứng dụng</a>";
+//        return ResponseEntity.ok(html);
+//    }
 
     // 4) Hủy vé + refund (ADMIN hoặc chủ vé, tùy policy)
     @PostMapping("/bookings/{id}/cancel")
@@ -136,5 +149,162 @@ public class ZaloPayController {
                 "bookingId", b.getId(),
                 "status", b.getStatus()
         ));
+    }
+
+    /**
+     * 4.1) API cho app gọi ngay khi quay về từ ZaloPay để kiểm tra trạng thái
+     * Thay vì poll /api/bookings/{id}, endpoint này xử lý nhanh hơn
+     */
+    @GetMapping("/payments/zalopay/status/{bookingId}")
+    public ResponseEntity<Map<String, Object>> checkPaymentStatus(
+            @PathVariable String bookingId,
+            @AuthenticationPrincipal JwtUser user) {
+
+        Ticket b = ticketRepo.findById(bookingId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+
+        // Kiểm tra quyền sở hữu
+        boolean isAdmin = user != null && "ADMIN".equalsIgnoreCase(user.getRole());
+        if (!isAdmin && b.getUserId() != null && !Objects.equals(b.getUserId(), user.getUserId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("bookingId", b.getId());
+        result.put("status", b.getStatus());
+        result.put("bookingCode", b.getBookingCode());
+
+        // Nếu đã CONFIRMED, trả thêm thông tin ghế
+        if ("CONFIRMED".equalsIgnoreCase(b.getStatus())) {
+            result.put("seats", b.getSeats());
+            result.put("showtimeId", b.getShowtimeId());
+            try {
+                result.put("amount", b.getAmount());
+            } catch (Throwable ignore) {}
+        }
+
+        return ResponseEntity.ok(result);
+    }
+
+    // 5) Cập nhật zpReturn để gọi status check
+    @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> zpReturn(@RequestParam(required=false) String bookingId,
+                                           @RequestParam(required=false) String canceled) {
+        if (deeplinkBase == null || deeplinkBase.isBlank()) {
+            return ResponseEntity.ok("Thiếu app.deeplink. Vui lòng mở lại ứng dụng.");
+        }
+
+        String sep = deeplinkBase.contains("?") ? "&" : "?";
+        String target = deeplinkBase + sep + "bookingId=" + bookingId;
+        if (canceled != null) {
+            target += (target.contains("?") ? "&" : "?") + "canceled=1";
+        }
+
+        // THÊM GỌI STATUS CHECK TRƯỚC KHI QUAY VỀ APP
+        String statusCheckUrl = ensureNoTrailingSlash(publicBaseUrl) +
+                "/api/payments/zalopay/status/" + bookingId;
+
+        String html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Đang xử lý thanh toán...</title>
+                <script>
+                    // 1. Gọi API kiểm tra trạng thái ngay lập tức
+                    async function checkStatus() {
+                        try {
+                            const response = await fetch('%s', {
+                                method: 'GET',
+                                headers: {
+                                    'Authorization': localStorage.getItem('token') || sessionStorage.getItem('token'),
+                                    'Content-Type': 'application/json'
+                                }
+                            });
+                            
+                            if (response.ok) {
+                                const result = await response.json();
+                                if (result.status === 'CONFIRMED') {
+                                    // Thành công - redirect về app với thông tin
+                                    window.location.href = '%s&status=CONFIRMED';
+                                } else {
+                                    // Lỗi - redirect với thông tin lỗi
+                                    window.location.href = '%s&status=FAILED';
+                                }
+                            } else {
+                                // Network error hoặc 4xx/5xx
+                                window.location.href = '%s&status=ERROR';
+                            }
+                        } catch (error) {
+                            console.error('Status check failed:', error);
+                            window.location.href = '%s&status=ERROR';
+                        }
+                    }
+                    
+                    // Tự động check sau 500ms để đảm bảo IPN đã xử lý xong
+                    setTimeout(checkStatus, 500);
+                    
+                    // Fallback sau 5s nếu không redirect được
+                    setTimeout(() => {
+                        window.location.href = '%s';
+                    }, 5000);
+                </script>
+                <style>
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        display: flex; 
+                        justify-content: center; 
+                        align-items: center; 
+                        height: 100vh; 
+                        margin: 0; 
+                        background: #f5f5f5;
+                    }
+                    .container {
+                        text-align: center;
+                        padding: 20px;
+                        background: white;
+                        border-radius: 10px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    }
+                    .spinner {
+                        border: 4px solid #f3f3f3;
+                        border-top: 4px solid #007bff;
+                        border-radius: 50%;
+                        width: 40px;
+                        height: 40px;
+                        animation: spin 1s linear infinite;
+                        margin: 0 auto 20px;
+                    }
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="spinner"></div>
+                    <h3>Đang xử lý thanh toán...</h3>
+                    <p>Vui lòng chờ trong giây lát</p>
+                </div>
+            </body>
+            </html>
+            """.formatted(
+                statusCheckUrl,                    // %s 1: status check URL
+                target,                           // %s 2: success redirect
+                target,                           // %s 3: failed redirect
+                target,                           // %s 4: error redirect
+                target,                           // %s 5: network error redirect
+                target                            // %s 6: fallback redirect
+        );
+
+        return ResponseEntity.ok().body(html);
+    }
+
+    // Helper method (thêm vào cuối class)
+    private String ensureNoTrailingSlash(String base) {
+        if (base == null) return "";
+        return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }
 }

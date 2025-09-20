@@ -2,6 +2,7 @@ package com.ntth.spring_boot_heroku_cinema_app.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.SeatLock;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
 import com.ntth.spring_boot_heroku_cinema_app.repository.SeatLedgerRepository;
@@ -9,6 +10,7 @@ import com.ntth.spring_boot_heroku_cinema_app.repository.SeatLockRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repository.TicketRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.Locale;
 
 @Service
 public class TicketService {
@@ -27,6 +30,10 @@ public class TicketService {
     private final SeatLedgerRepository ledgerRepo;
     private final ZaloPayService zalo;
     private final MongoTemplate mongo;
+    private static final Logger log = LoggerFactory.getLogger(TicketService.class); // Sửa logger
+
+    @Value("${momo.secretKey:K951B6PE1waDMi640xX08PD3vg6EkVlz}")
+    private String momoSecretKey;
 
     public TicketService(SeatLockRepository lockRepo,
                          TicketRepository bookingRepo,
@@ -43,13 +50,64 @@ public class TicketService {
     /**
      * Tạo booking từ 1 hold có sẵn:
      * - Kiểm tra hold còn hạn
-     * - Tạo booking (PENDING_PAYMENT hoặc CONFIRMEDnếu CASH)
+     * - Tạo booking (PENDING_PAYMENT hoặc CONFIRMED nếu CASH)
      * - Chuyển ledger HOLD->CONFIRMED atomically (nếu paymentMethod=CASH)
      *
      * @param holdId id của seat lock
      * @param userId chủ sở hữu
      * @param paymentMethod "CASH" | "ZALOPAY"
      */
+    @Transactional
+    public Ticket createBookingFromHold(String holdId, String userId, String paymentMethod) {
+        // 1) Load hold
+        SeatLock hold = lockRepo.findById(holdId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.GONE, "HOLD_EXPIRED_OR_NOT_FOUND"));
+
+        // 1.1) Chủ sở hữu
+        if (!Objects.equals(hold.getUserId(), userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
+        }
+        // 1.2) Chưa hết hạn
+        if (hold.getExpiresAt() == null || hold.getExpiresAt().isBefore(Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.GONE, "HOLD_EXPIRED");
+        }
+
+        // 2) Rẽ nhánh theo phương thức thanh toán
+        String method = (paymentMethod == null ? "" : paymentMethod).trim().toUpperCase(Locale.ROOT);
+        if ("ZALOPAY".equals(method)) {
+            // Giữ nguyên flow ZaloPay: tạo booking PENDING_PAYMENT, xác nhận qua IPN
+            return createBookingZaloPay(holdId, userId);
+        }
+
+        // 3) Tạo ticket trạng thái CONFIRMED (snapshot số tiền từ hold)
+        if ("CASH".equals(method) || method.isEmpty()) {
+            String bookingCode = genCode();
+
+            Ticket b = new Ticket();
+            b.setUserId(userId);
+            b.setShowtimeId(hold.getShowtimeId());
+            b.setSeats(new ArrayList<>(hold.getSeats()));
+            b.setAmount(hold.getAmount());      // SeatLock có getAmount()
+            b.setHoldId(holdId);
+            b.setBookingCode(bookingCode);
+            b.setStatus("CONFIRMED");
+            b.setCreatedAt(Instant.now());
+            b = ticketRepo.save(b);
+
+            // 3.2) Đổi ledger: HOLD -> CONFIRMED theo bookingId & holdId (đảm bảo đúng chủ hold + còn hạn)
+            long updated = ledgerRepo.confirmMany(hold.getShowtimeId(), hold.getSeats(), b.getId(), holdId);
+            if (updated != hold.getSeats().size()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
+            }
+            // 3.3) Xoá SeatLock
+            lockRepo.deleteById(holdId);
+            return b;
+        }
+
+        // 5) Không hỗ trợ phương thức khác
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "UNSUPPORTED_PAYMENT_METHOD");
+    }
+
     /**
      * Tạo booking từ hold: trạng thái PENDING_PAYMENT (ZaloPay)
      * =>tạo PENDING_PAYMENT và đợi IPN xác nhận
@@ -79,7 +137,9 @@ public class TicketService {
         b.setUserId(userId);
         b.setShowtimeId(hold.getShowtimeId());
         b.setSeats(new ArrayList<>(hold.getSeats()));
-        try { b.setAmount(hold.getAmount()); } catch (Throwable ignore) {}
+        try {
+            b.setAmount(hold.getAmount());
+        } catch (Throwable ignore) {}
         b.setHoldId(holdId);
         b.setStatus("PENDING_PAYMENT");
         b.setCreatedAt(Instant.now());
@@ -95,6 +155,37 @@ public class TicketService {
 
         // 4) Lưu booking
         return ticketRepo.save(b);
+    }
+
+    /** Tạo booking dùng cổng MoMo: từ holdId -> Ticket PENDING_PAYMENT */
+    @Transactional
+    public Ticket createBookingMoMo(String holdId, JwtUser user) {
+        // Giống createBookingZaloPay của bạn:
+        //  - kiểm tra holdId hợp lệ, thuộc user
+        //  - sinh bookingCode
+        //  - tạo Ticket status=PENDING_PAYMENT, payment.gateway="MOMO", lưu holdId để confirm ledger
+
+        SeatLock lock = lockRepo.findById(holdId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "HOLD_NOT_FOUND"));
+
+        // (tuỳ yêu cầu: kiểm tra owner lock == user)
+        Ticket t = new Ticket();
+        t.setUserId(user.getUserId());
+        t.setShowtimeId(lock.getShowtimeId());
+        t.setSeats(lock.getSeats());
+        try {
+            t.setAmount(lock.getAmount());
+        } catch (Exception ignore) {}
+        t.setStatus("PENDING_PAYMENT");
+        t.setHoldId(lock.getId());
+        t.setBookingCode(genCode());
+        t.setCreatedAt(Instant.now());
+
+        Ticket.PaymentInfo p = new Ticket.PaymentInfo();
+        p.setGateway("MOMO");
+        t.setPayment(p);
+
+        return ticketRepo.save(t);
     }
 
     /**
@@ -114,9 +205,7 @@ public class TicketService {
      */
     @Transactional
     public void handleZpIpn(Map<String, String> req) {
-        Logger log = LoggerFactory.getLogger(getClass());
-
-        // -------- 1) Lấy data/mac & verify chữ ký --------
+        // -------- 1) Lấy data/mac & verify chữ ký -------- (giữ nguyên)
         String data = req.get("data");
         String mac  = req.get("mac");
         if (data == null || mac == null) {
@@ -135,7 +224,7 @@ public class TicketService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "PARSE_FAILED");
         }
 
-        // -------- 2) Lấy app_trans_id -> bookingCode --------
+        // -------- 2) Lấy app_trans_id -> bookingCode -------- (giữ nguyên)
         String appTransId = String.valueOf(parsed.get("app_trans_id"));
         if (appTransId == null || appTransId.isEmpty() || !appTransId.contains("_")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_APP_TRANS_ID");
@@ -145,7 +234,7 @@ public class TicketService {
         Ticket b = ticketRepo.findByBookingCode(bookingCode)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        // Đảm bảo có PaymentInfo
+        // Đảm bảo có PaymentInfo (giữ nguyên)
         Ticket.PaymentInfo pay = b.getPayment();
         if (pay == null) {
             pay = new Ticket.PaymentInfo();
@@ -153,19 +242,17 @@ public class TicketService {
             b.setPayment(pay);
         }
 
-        // Ghi zp_trans_id/txId (kể cả TEST_… cho IPN giả)
+        // Ghi zp_trans_id/txId (giữ nguyên)
         Object zptObj = parsed.get("zp_trans_id");
         if (zptObj != null) {
             String zpt = String.valueOf(zptObj);
             pay.setTxId(zpt);
             try { pay.setZpTransId(zpt); } catch (Throwable ignore) {}
         }
-        // Lưu raw luôn để trace
         pay.setRaw(parsed);
 
-        // -------- 3) Đọc status/amount từ IPN --------
-        int statusFromZp = safeInt(parsed.get("status"), 0);
-
+        // -------- 3) Đọc status/amount từ IPN -------- (giữ nguyên)
+        int statusFromZp = safeInt(parsed.get("status"), -1);
         long amountFromZp = 0L;
         Object amountObj = parsed.get("amount");
         if (amountObj instanceof Number) {
@@ -174,11 +261,10 @@ public class TicketService {
             try { amountFromZp = Long.parseLong(String.valueOf(amountObj)); } catch (Exception ignore) {}
         }
 
-        // -------- 4) Check amount an toàn (không quăng lỗi nếu null/không parse được) --------
-        Long bookingAmount = b.getAmount(); // có thể null (wrapper)
+        // -------- 4) Check amount an toàn -------- (giữ nguyên)
+        Long bookingAmount = b.getAmount();
         if (bookingAmount != null && amountFromZp > 0 && bookingAmount.longValue() != amountFromZp) {
             log.warn("IPN amount mismatch booking={} zp={}", bookingAmount, amountFromZp);
-            // đánh FAILED để FE thấy rõ, không throw để ZP không retry vô hạn
             try {
                 b.setStatus("FAILED");
                 ticketRepo.save(b);
@@ -186,44 +272,222 @@ public class TicketService {
             return;
         }
 
-        // -------- 5) Xử lý theo status từ ZaloPay --------
-        if (statusFromZp == 1) {
-            // Đã thanh toán thành công
+        // -------- 5) THAY ĐỔI LOGIC: status=0 hoặc 1 đều CONFIRMED ngay --------
+        if (statusFromZp == 0 || statusFromZp == 1) {
+            // CẢ PENDING VÀ SUCCESS ĐỀU CONFIRMED NGAY LẬP TỨC
             if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
                 b.setStatus("CONFIRMED");
                 pay.setPaidAt(Instant.now());
                 ticketRepo.save(b);
 
+                // Confirm ghế trong ledger
                 long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
                 if (updated != (b.getSeats() == null ? 0 : b.getSeats().size())) {
-                    // Trường hợp hiếm: ledger không confirm đủ ghế
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
                 }
+
                 // Xóa hold
                 try { lockRepo.deleteById(b.getHoldId()); } catch (Throwable ignore) {}
 
-                log.debug("IPN confirm: bookingId={}, holdId={}, showtimeId={}, seats={}",
-                        b.getId(), b.getHoldId(), b.getShowtimeId(), b.getSeats());
+                log.info("IPN CONFIRMED: bookingId={}, statusFromZp={}, holdId={}, seats={}",
+                        b.getId(), statusFromZp, b.getHoldId(), b.getSeats());
             }
             return;
         }
 
-        if (statusFromZp == 0) {
-            // Pending: giữ nguyên PENDING_PAYMENT để FE tiếp tục poll
-            if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
-                b.setStatus("PENDING_PAYMENT");
-                ticketRepo.save(b);
-            }
-            log.debug("IPN pending (status=0) booking={} keep PENDING_PAYMENT", bookingCode);
-            return;
-        }
-
-        // Các status còn lại coi như fail/cancel
+        // Các status còn lại (2, 3, ...) coi như fail
         if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
             b.setStatus("CANCELED");
             ticketRepo.save(b);
         }
         log.debug("IPN not success (status={}) booking={} -> CANCELED", statusFromZp, bookingCode);
+    }
+
+    @Transactional
+    public void handleMomoIpn(Map<String, Object> ipn) {
+        // 1) Lấy các field chính
+        String partnerCode = String.valueOf(ipn.get("partnerCode"));
+        String accessKey   = String.valueOf(ipn.get("accessKey"));
+        String orderId     = String.valueOf(ipn.get("orderId"));     // mình dùng bookingCode
+        String requestId   = String.valueOf(ipn.get("requestId"));
+        String amountStr   = String.valueOf(ipn.get("amount"));
+        String orderInfo   = String.valueOf(ipn.get("orderInfo"));
+        String orderType   = String.valueOf(ipn.get("orderType"));
+        String transId     = String.valueOf(ipn.get("transId"));
+        String resultCode  = String.valueOf(ipn.get("resultCode"));
+        String message     = String.valueOf(ipn.get("message"));
+        String payType     = String.valueOf(ipn.get("payType"));
+        String responseTime= String.valueOf(ipn.get("responseTime"));
+        String extraData   = String.valueOf(ipn.get("extraData"));
+        String signature   = String.valueOf(ipn.get("signature"));
+
+        // 2) Verify signature
+        String raw =
+                "accessKey="+accessKey+
+                        "&amount="+amountStr+
+                        "&extraData="+extraData+
+                        "&message="+message+
+                        "&orderId="+orderId+
+                        "&orderInfo="+orderInfo+
+                        "&orderType="+orderType+
+                        "&partnerCode="+partnerCode+
+                        "&payType="+payType+
+                        "&requestId="+requestId+
+                        "&responseTime="+responseTime+
+                        "&resultCode="+resultCode+
+                        "&transId="+transId;
+
+        // Sửa: import đúng class và gọi method static
+        String expected = MomoService.hmacSHA256(raw, this.momoSecretKey);
+        if (!expected.equals(signature)) {
+            // Sai chữ ký -> bỏ qua
+            log.warn("MoMo IPN invalid signature orderId={}", orderId);
+            return;
+        }
+
+        // 3) Tìm booking theo bookingCode (orderId)
+        Ticket b = ticketRepo.findByBookingCode(orderId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+
+        // 4) Parse amount from MoMo
+        long amountFromMomo = 0L;
+        try {
+            amountFromMomo = Long.parseLong(amountStr);
+        } catch (NumberFormatException ignore) {}
+
+        // 4) Kiểm tiền
+        Long amountInDb = b.getAmount(); // có thể null
+
+        if (amountInDb != null && amountFromMomo > 0 && amountInDb.longValue() != amountFromMomo) {
+            log.warn("IPN amount mismatch booking={} db={} ipn={}", b.getBookingCode(), amountInDb, amountFromMomo);
+            try {
+                b.setStatus("FAILED");
+                ticketRepo.save(b);
+            } catch (Throwable ignore) {}
+            return;
+        }
+
+        // 5) Kết quả
+        int rc;
+        try {
+            rc = Integer.parseInt(resultCode);
+        } catch (NumberFormatException e) {
+            rc = -1;
+        }
+
+        if (rc == 0) {
+            // PAID
+            if ("CONFIRMED".equals(b.getStatus())) return; // idempotent
+
+            b.setStatus("CONFIRMED");
+            Ticket.PaymentInfo p = b.getPayment() != null ? b.getPayment() : new Ticket.PaymentInfo();
+            p.setGateway("MOMO");
+            p.setPaidAt(Instant.now());
+            p.setTxId(transId);
+            p.setRaw(ipn);
+            b.setPayment(p);
+            ticketRepo.save(b);
+
+            long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
+            if (updated != (b.getSeats() == null ? 0 : b.getSeats().size())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
+            }
+            try { lockRepo.deleteById(b.getHoldId()); } catch (Throwable ignore) {}
+
+        } else if (rc == 1006 || rc == 9000) {
+            // pending / user paying — giữ nguyên PENDING_PAYMENT
+            log.debug("MoMo IPN pending rc={} booking={}", rc, b.getBookingCode());
+        } else {
+            // Failed / canceled
+            b.setStatus("CANCELED");
+            ticketRepo.save(b);
+            // (tuỳ bạn có release hold hay để cron dọn)
+        }
+    }
+
+    /** IPN MoMo: thanh toán thành công */
+    @Transactional
+    public void handleMomoIpnPaid(String bookingId, String bookingCode, long amountFromMomo,
+                                  String transId, Map<String, Object> raw) {
+        Logger log = LoggerFactory.getLogger(getClass());
+
+        // Tìm booking theo bookingId hoặc bookingCode
+        Ticket b = findByEither(bookingId, bookingCode);
+        if (b == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND");
+        }
+
+        // Idempotent
+        if ("CONFIRMED".equalsIgnoreCase(b.getStatus())) return;
+
+        // --- Kiểm tra khớp tiền (null-safe) ---
+        Long amountInDb = b.getAmount();
+        if (amountInDb != null && amountFromMomo > 0L && amountInDb.longValue() != amountFromMomo) {
+            log.warn("MoMo IPN amount mismatch bookingCode={} db={} ipn={}",
+                    b.getBookingCode(), amountInDb, amountFromMomo);
+            try {
+                b.setStatus("FAILED");
+                ticketRepo.save(b);
+            } catch (Throwable ignore) {}
+            return;
+        }
+
+        // --- Cập nhật thông tin thanh toán ---
+        Ticket.PaymentInfo p = b.getPayment();
+        if (p == null) p = new Ticket.PaymentInfo();
+        p.setGateway("MOMO");
+        if (transId != null) p.setTxId(transId);    // dùng txId chung (không cần setMomoTransId)
+        p.setPaidAt(Instant.now());
+        try { p.setRaw(raw); } catch (Throwable ignore) {}
+        b.setPayment(p);
+
+        // --- Xác nhận vé ---
+        b.setStatus("CONFIRMED");
+        ticketRepo.save(b);
+
+        // --- Confirm ledger + xoá hold ---
+        long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
+        if (updated != b.getSeats().size()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
+        }
+        try { lockRepo.deleteById(b.getHoldId()); } catch (Throwable ignore) {}
+    }
+
+    /** IPN MoMo: cancel/failed */
+    @Transactional
+    public void handleMomoIpnCanceled(String bookingId, String bookingCode, Map<String,Object> raw) {
+        Ticket b = findByEither(bookingId, bookingCode);
+        if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
+            b.setStatus("CANCELED");
+            if (b.getPayment() == null) b.setPayment(new Ticket.PaymentInfo());
+            b.getPayment().setRaw(raw);
+            ticketRepo.save(b);
+        }
+        // tuỳ chính sách: không confirm ledger; hold sẽ hết hạn hoặc bạn có API release
+    }
+
+    @Transactional
+    public void handleMomoIpnFailed(String bookingId, String bookingCode, Map<String,Object> raw) {
+        Ticket b = findByEither(bookingId, bookingCode);
+        if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
+            b.setStatus("FAILED");
+            if (b.getPayment() == null) b.setPayment(new Ticket.PaymentInfo());
+            b.getPayment().setRaw(raw);
+            ticketRepo.save(b);
+        }
+    }
+
+    // Helper: tìm theo bookingId hoặc bookingCode
+    private Ticket findByEither(String bookingId, String bookingCode) {
+        if (bookingId != null) {
+            return ticketRepo.findById(bookingId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+        }
+        if (bookingCode != null) {
+            return ticketRepo.findByBookingCode(bookingCode)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "MISSING_BOOKING_REF");
     }
 
     private int safeInt(Object o, int def) {
@@ -232,55 +496,6 @@ public class TicketService {
             try { return Integer.parseInt(String.valueOf(o)); } catch (Exception ignore) {}
         }
         return def;
-    }
-
-    @Transactional
-    public Ticket createBookingFromHold(String holdId, String userId, String paymentMethod) {
-        // 1) Load hold
-        SeatLock hold = lockRepo.findById(holdId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.GONE, "HOLD_EXPIRED_OR_NOT_FOUND"));
-
-        // 1.1) Chủ sở hữu
-        if (!Objects.equals(hold.getUserId(), userId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
-        }
-        // 1.2) Chưa hết hạn
-        if (hold.getExpiresAt() == null || hold.getExpiresAt().isBefore(Instant.now())) {
-            throw new ResponseStatusException(HttpStatus.GONE, "HOLD_EXPIRED");
-        }
-
-        // 2) Rẽ nhánh theo phương thức thanh toán
-        String method = (paymentMethod == null ? "" : paymentMethod).trim().toUpperCase(Locale.ROOT);
-        if ("ZALOPAY".equals(method)) {
-            // Giữ nguyên flow ZaloPay: tạo booking PENDING_PAYMENT, xác nhận qua IPN
-            return createBookingZaloPay(holdId, userId);
-        }
-
-        //3) Tạo ticket trạng thái CONFIRMED (snapshot số tiền từ hold)
-        if ("CASH".equals(method) || method.isEmpty()) {
-            String bookingCode = genCode();
-
-            Ticket b = new Ticket();
-            b.setUserId(userId);
-            b.setShowtimeId(hold.getShowtimeId());
-            b.setSeats(new ArrayList<>(hold.getSeats()));
-            b.setAmount(hold.getAmount());      // SeatLock có getAmount()
-            b.setHoldId(holdId);
-            b.setBookingCode(bookingCode);
-            b.setStatus("CONFIRMED");
-            b = ticketRepo.save(b);
-            // 3.2) Đổi ledger: HOLD -> CONFIRMED theo bookingId & holdId (đảm bảo đúng chủ hold + còn hạn)
-            long updated = ledgerRepo.confirmMany(hold.getShowtimeId(), hold.getSeats(), b.getId(), holdId);
-            if (updated != hold.getSeats().size()) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
-            }
-            // 3.3) Xoá SeatLock
-            lockRepo.deleteById(holdId);
-            return b;
-        }
-
-        // 5) Không hỗ trợ phương thức khác
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "UNSUPPORTED_PAYMENT_METHOD");
     }
 
     /**
@@ -292,7 +507,8 @@ public class TicketService {
      */
     @Transactional
     public Ticket cancelBooking(String bookingId, String reason) {
-        Logger log = LoggerFactory.getLogger(getClass());
+        // Sửa: dùng static logger
+        // Logger log = LoggerFactory.getLogger(getClass());
 
         Ticket b = ticketRepo.findById(bookingId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
@@ -304,18 +520,25 @@ public class TicketService {
         String cancelReason = (reason == null || reason.isBlank()) ? "cancel" : reason.trim();
 
         String gateway = null;
-        try { gateway = (b.getPayment() != null ? b.getPayment().getGateway() : null); } catch (Throwable ignore) {}
+        try {
+            gateway = (b.getPayment() != null ? b.getPayment().getGateway() : null);
+        } catch (Throwable ignore) {}
 
         if ("ZALOPAY".equalsIgnoreCase(gateway)) {
             String zpTransId = null;
-            try { zpTransId = b.getPayment().getZpTransId(); } catch (Throwable ignore) {}
+            try {
+                zpTransId = b.getPayment().getZpTransId();
+            } catch (Throwable ignore) {}
             if (zpTransId == null || zpTransId.isBlank()) {
-                try { zpTransId = b.getPayment().getTxId(); } catch (Throwable ignore) {}
+                try {
+                    zpTransId = b.getPayment().getTxId();
+                } catch (Throwable ignore) {}
             }
 
             if (zpTransId == null || zpTransId.isBlank()) {
                 // Thiếu transaction id -> DEV: skip refund
                 // Nếu cần chặt chẽ thì throw 400 "ZP_TRANS_ID_MISSING"
+                log.warn("Cannot refund: missing zp_trans_id for booking {}", bookingId);
             } else if (zpTransId.startsWith("TEST_")) {
                 // >>> PATCH DEV: bỏ qua refund thật nếu là mã giả lập
                 log.warn("Mock cancel: skip real ZaloPay refund for test id {}", zpTransId);
@@ -328,8 +551,12 @@ public class TicketService {
 
                 Object rcObj = (ret != null ? ret.get("return_code") : null);
                 int rc;
-                try { rc = (rcObj instanceof Number) ? ((Number) rcObj).intValue() : Integer.parseInt(String.valueOf(rcObj)); }
-                catch (Exception e) { rc = -999; }
+                try {
+                    rc = (rcObj instanceof Number) ? ((Number) rcObj).intValue() : Integer.parseInt(String.valueOf(rcObj));
+                }
+                catch (Exception e) {
+                    rc = -999;
+                }
 
                 if (rc != 1) {
                     log.error("ZaloPay refund failed: rc={}, resp={}", rc, ret);
@@ -349,7 +576,6 @@ public class TicketService {
         ticketRepo.save(b);
         return b;
     }
-
 
     /**
      * Tạo mã ngẫu nhiên theo định dạng UIN-XXXXXX

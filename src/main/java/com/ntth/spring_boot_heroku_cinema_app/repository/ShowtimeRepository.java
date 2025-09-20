@@ -24,11 +24,11 @@ public interface ShowtimeRepository extends MongoRepository<Showtime, String> {
     List<Showtime> findTop10ByMovieIdAndStartAtAfterOrderByStartAtAsc(String movieId, Instant now);
 
     // Lấy theo nhiều roomId
-    List<Showtime> findByRoomIdIn(Collection<String> roomIds);
+    List<Showtime> findByRoomIdIn(List<String> roomIds);
 
     // Thường ta cần lọc theo ngày: [date 00:00, date+1 00:00)
     @Query("{ 'roomId': { $in: ?0 }, 'startAt': { $gte: ?1, $lt: ?2 } }")
-    List<Showtime> findByRoomIdInAndStartAtBetween(Collection<String> roomIds, Instant start, Instant end);
+    List<Showtime> findByRoomIdInAndStartAtBetween(List<String> roomIds, Instant start, Instant end);
 
     // Trả toàn bộ showtime theo danh sách room + movie, sort theo startAt tăng dần
     List<Showtime> findByRoomIdInAndMovieIdOrderByStartAtAsc(Collection<String> roomIds, String movieId);

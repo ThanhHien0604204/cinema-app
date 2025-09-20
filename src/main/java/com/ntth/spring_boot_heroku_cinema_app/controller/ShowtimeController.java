@@ -95,21 +95,19 @@ public class ShowtimeController {
             @PathVariable String movieId,
             @RequestParam(name = "date", required = false) String dateStr
     ) {
-        LocalDate date = null;
-        if (dateStr != null && !dateStr.isBlank()) {
-            try {
-                // Loại bỏ các ký tự không mong muốn (ví dụ: \n, \r, <EOL>)
+        try {
+            LocalDate date = null;
+            if (dateStr != null && !dateStr.isBlank()) {
                 String cleanedDateStr = dateStr.replaceAll("[\\n\\r\\t]", "").trim();
-                date = LocalDate.parse(cleanedDateStr); // "2025-08-25"
-            } catch (DateTimeParseException ex) {
-                throw new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST, "Tham số 'date' phải có định dạng yyyy-MM-dd"
-                );
+                date = LocalDate.parse(cleanedDateStr);
             }
+            System.out.println("Calling service with cinemaId: " + cinemaId + ", movieId: " + movieId + ", date: " + date);
+            return showtimeService.getByCinemaAndMovie(cinemaId, movieId, date);
+        } catch (Exception e) {
+            e.printStackTrace(); // Log để debug
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi server: " + e.getMessage());
         }
-        return showtimeService.getByCinemaAndMovie(cinemaId, movieId, date);
     }
-
 
     @GetMapping("/{id}")
     public Showtime get(@PathVariable String id) {
