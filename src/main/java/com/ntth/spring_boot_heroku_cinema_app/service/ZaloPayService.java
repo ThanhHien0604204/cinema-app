@@ -144,7 +144,26 @@ public class ZaloPayService {
         out.put("parsed", parsed);
         return out;
     }
+    /**
+     * Tạo embed_data chứa redirect URLs
+     */
+    private String createEmbedData(Ticket b) {
+        Map<String, String> embed = new LinkedHashMap<>();
 
+        // SUCCESS: Quay về app với bookingId
+        String successUrl = deeplinkBase + "?bookingId=" + b.getId();
+        embed.put("redirecturl", successUrl);  // QUAN TRỌNG: ZaloPay dùng field này
+
+        // CANCEL URL
+        String cancelUrl = deeplinkBase + "?bookingId=" + b.getId() + "&canceled=1";
+        embed.put("cancelurl", cancelUrl);
+
+        // FALLBACK WEB URL (nếu deep link fail)
+        String webSuccessUrl = publicBaseUrl + "/api/payments/zalopay/return?bookingId=" + b.getId();
+        embed.put("web_redirect_url", webSuccessUrl);
+
+        return toJson(embed);
+    }
     /** Refund (sandbox/prod). amount phải <= amount đã thanh toán */
     public Map<String, Object> refund(String zpTransId, long amount, String description) {
         if (zpTransId == null || zpTransId.isBlank())

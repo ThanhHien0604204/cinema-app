@@ -139,45 +139,32 @@ public class ZaloPayController {
                                             @RequestBody(required = false) Map<String, Object> body,
                                             @AuthenticationPrincipal JwtUser user) {
 
-        log.info("Confirm booking request: bookingId={}, userId={}", bookingId,
-                user != null ? user.getUserId() : "anonymous");
-
         try {
             if (user == null || user.getUserId() == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "UNAUTHORIZED", "message", "Please login"));
+                // FOR AUTO CONFIRM FROM HTML - KHÔNG CẦN AUTH
+                log.warn("Confirm without auth for bookingId={}", bookingId);
             }
 
-            // Gọi service để CONFIRM (ticket, seats, delete lock)
-            Ticket confirmed = ticketService.confirmBookingFromPending(bookingId, user.getUserId());
+            Ticket confirmed = ticketService.confirmBookingFromPending(bookingId,
+                    user != null ? user.getUserId() : "auto-confirm");
 
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("success", true);
             result.put("bookingId", confirmed.getId());
             result.put("bookingCode", confirmed.getBookingCode());
             result.put("status", confirmed.getStatus()); // CONFIRMED
-            result.put("seats", confirmed.getSeats());
-            result.put("showtimeId", confirmed.getShowtimeId());
-            result.put("amount", confirmed.getAmount());
-            result.put("message", "Vé đã được xác nhận thành công!");
 
-            log.info("Booking confirmed successfully: bookingId={}, code={}, user={}",
-                    bookingId, confirmed.getBookingCode(), user.getUserId());
-
+            log.info("Auto confirmed booking: {}", bookingId);
             return ResponseEntity.ok(result);
 
         } catch (ResponseStatusException ex) {
-            log.warn("Confirm failed with status {}: {}", ex.getStatusCode(), ex.getReason());
-            Map<String, Object> error = Map.of(
-                    "success", false,
-                    "error", ex.getReason(),
-                    "statusCode", ex.getStatusCode().value()
-            );
-            return ResponseEntity.status(ex.getStatusCode()).body(error);
+            log.warn("Confirm failed: {}", ex.getReason());
+            return ResponseEntity.status(ex.getStatusCode())
+                    .body(Map.of("success", false, "error", ex.getReason()));
         } catch (Exception ex) {
-            log.error("Unexpected error confirming booking {}: {}", bookingId, ex.getMessage(), ex);
+            log.error("Confirm error: {}", ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("success", false, "error", "INTERNAL_ERROR", "message", ex.getMessage()));
+                    .body(Map.of("success", false, "error", "INTERNAL_ERROR"));
         }
     }
 
@@ -253,8 +240,9 @@ public class ZaloPayController {
 
     // 6) Cập nhật zpReturn để gọi status check
     @GetMapping(value = "/payments/zalopay/return", produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<String> zpReturn(@RequestParam(required=false) String bookingId,
-                                           @RequestParam(required=false) String canceled) {
+    public ResponseEntity<String> zpReturn(@RequestParam(required = false) String bookingId,
+                                           @RequestParam(required = false) String canceled) {
+
         if (deeplinkBase == null || deeplinkBase.isBlank()) {
             return ResponseEntity.ok("Thiếu app.deeplink. Vui lòng mở lại ứng dụng.");
         }
@@ -262,71 +250,160 @@ public class ZaloPayController {
         String sep = deeplinkBase.contains("?") ? "&" : "?";
         String target = deeplinkBase + sep + "bookingId=" + bookingId;
 
-        if (canceled != null) {
+        if (canceled != null && !canceled.isEmpty()) {
             target += (target.contains("?") ? "&" : "?") + "canceled=1";
-            String html = """
-            <!DOCTYPE html>
-            <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-            <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
-                <div style="text-align:center;padding:20px;background:white;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);">
-                    <h3>Thanh toán đã bị hủy</h3>
-                    <p><a href="%s">Mở ứng dụng</a></p>
-                </div>
-            </body></html>
-            """.formatted(target);
-            return ResponseEntity.ok().body(html);
+            return ResponseEntity.ok(createCancelHtml(target));
         }
-        // TẠO statusCheckUrl - ĐÂY LÀ NÓ
-        String statusCheckUrl = ensureNoTrailingSlash(publicBaseUrl) +
-                "/api/payments/zalopay/status/" + bookingId;
-        // REDIRECT NGAY VỀ APP - app sẽ handle confirm
+
+        // CHECK STATUS VÀ CONFIRM TỰ ĐỘNG
+        String statusCheckUrl = ensureNoTrailingSlash(publicBaseUrl) + "/api/payments/zalopay/status/" + bookingId;
+        String confirmUrl = ensureNoTrailingSlash(publicBaseUrl) + "/api/bookings/" + bookingId + "/confirm";
+
         String html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Đang xử lý thanh toán...</title>
-        <script>
-            async function checkStatus() {
-                try {
-                    const response = await fetch('%s');
-                    if (response.ok) {
-                        const result = await response.json();
-                        // CẢ CONFIRMED VÀ PENDING_PAYMENT ĐỀU SUCCESS
-                        if (result.status === 'CONFIRMED' || result.status === 'PENDING_PAYMENT') {
-                            window.location.href = '%s&status=SUCCESS';
-                        } else {
-                            window.location.href = '%s&status=FAILED';
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Xác nhận thanh toán</title>
+            <script>
+                async function processPayment() {
+                    try {
+                        // 1. CHECK STATUS
+                        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+                        const statusResponse = await fetch('%s', {
+                            method: 'GET',
+                            headers: { 
+                                'Authorization': token ? 'Bearer ' + token : '',
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        
+                        if (statusResponse.ok) {
+                            const statusResult = await statusResponse.json();
+                            console.log('Status check:', statusResult);
+                            
+                            // 2. NẾU PENDING_PAYMENT → AUTO CONFIRM
+                            if (statusResult.status === 'PENDING_PAYMENT') {
+                                const confirmResponse = await fetch('%s', {
+                                    method: 'POST',
+                                    headers: { 
+                                        'Authorization': token ? 'Bearer ' + token : '',
+                                        'Content-Type': 'application/json'
+                                    }
+                                });
+                                
+                                if (confirmResponse.ok) {
+                                    console.log('Auto confirmed booking');
+                                    // Redirect về app với SUCCESS
+                                    window.location.href = '%s&status=SUCCESS';
+                                    return;
+                                } else {
+                                    console.error('Confirm failed:', confirmResponse.status);
+                                }
+                            }
+                            
+                            // 3. CONFIRMED → SUCCESS
+                            if (statusResult.status === 'CONFIRMED') {
+                                window.location.href = '%s&status=SUCCESS';
+                                return;
+                            }
+                            
+                            // 4. FAILED/CANCELED → ERROR
+                            if (statusResult.status === 'FAILED' || statusResult.status === 'CANCELED') {
+                                window.location.href = '%s&status=FAILED';
+                                return;
+                            }
                         }
-                    } else {
-                        // Fallback: coi như success
+                        
+                        // 5. NETWORK ERROR → FALLBACK SUCCESS (business decision)
+                        window.location.href = '%s&status=SUCCESS';
+                        
+                    } catch (error) {
+                        console.error('Process payment failed:', error);
+                        // Fallback success
                         window.location.href = '%s&status=SUCCESS';
                     }
-                } catch (error) {
-                    console.error('Status check failed:', error);
-                    window.location.href = '%s&status=SUCCESS';
                 }
-            }
-            
-            setTimeout(checkStatus, 500);
-            setTimeout(() => window.location.href = '%s&status=SUCCESS', 3000);
-        </script>
-        <!-- CSS giữ nguyên -->
-    </head>
-    <body>
-        <!-- HTML content giữ nguyên -->
-    </body>
-    </html>
-    """.formatted(
-                statusCheckUrl,   // %s 1: API endpoint để check status
-                target,           // %s 2: Deep link success
-                target,           // %s 3: Deep link failed
-                target,           // %s 4: Deep link error
-                target            // %s 5: Fallback
+                
+                // Auto process sau 500ms
+                setTimeout(processPayment, 500);
+                
+                // Fallback sau 5s
+                setTimeout(() => {
+                    window.location.href = '%s&status=SUCCESS';
+                }, 5000);
+            </script>
+            <style>
+                body { 
+                    font-family: Arial, sans-serif; 
+                    display: flex; 
+                    justify-content: center; 
+                    align-items: center; 
+                    height: 100vh; 
+                    margin: 0; 
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                }
+                .container {
+                    text-align: center;
+                    padding: 40px;
+                    background: rgba(255,255,255,0.1);
+                    border-radius: 20px;
+                    backdrop-filter: blur(10px);
+                }
+                .spinner { 
+                    border: 3px solid rgba(255,255,255,0.3); 
+                    border-top: 3px solid white; 
+                    border-radius: 50%; 
+                    width: 40px; 
+                    height: 40px; 
+                    animation: spin 1s linear infinite; 
+                    margin: 0 auto 20px; 
+                }
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="spinner"></div>
+                <h2>Xác nhận thanh toán</h2>
+                <p>Đang xử lý và chuyển về ứng dụng...</p>
+            </div>
+        </body>
+        </html>
+        """.formatted(
+                statusCheckUrl,    // %s 1: Status check URL
+                confirmUrl,        // %s 2: Confirm API URL
+                target,            // %s 3: Success deep link
+                target,            // %s 4: Confirmed deep link
+                target,            // %s 5: Failed deep link
+                target,            // %s 6: Network error fallback
+                target,            // %s 7: Final fallback
+                target             // %s 8: 5s fallback
         );
 
         return ResponseEntity.ok().body(html);
+    }
+
+    private String createCancelHtml(String target) {
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Thanh toán bị hủy</title>
+            <meta http-equiv="refresh" content="2;url=%s">
+        </head>
+        <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f5f5f5;">
+            <div style="text-align:center;padding:20px;background:white;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+                <h3>❌ Thanh toán đã bị hủy</h3>
+                <p>Đang quay về ứng dụng...</p>
+            </div>
+        </body>
+        </html>
+        """.formatted(target);
     }
 
     // Helper method

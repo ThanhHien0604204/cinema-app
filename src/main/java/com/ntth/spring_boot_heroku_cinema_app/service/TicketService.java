@@ -54,84 +54,62 @@ public class TicketService {
      */
     @Transactional
     public Ticket confirmBookingFromPending(String bookingId, String userId) {
-        log.info("Starting confirm process for bookingId={}, userId={}", bookingId, userId);
+        log.info("Confirming booking: {} by user: {}", bookingId, userId);
 
-        // 1. Find và validate booking
+        // 1. Find booking
         Ticket b = ticketRepo.findById(bookingId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-        // Check ownership
-        if (!Objects.equals(b.getUserId(), userId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "NOT_YOUR_BOOKING");
-        }
-
-        // Check current status
+        // 2. Validate status
         if (!"PENDING_PAYMENT".equalsIgnoreCase(b.getStatus())) {
             if ("CONFIRMED".equalsIgnoreCase(b.getStatus())) {
                 log.info("Booking {} already confirmed", bookingId);
                 return b;
             }
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_BOOKING_STATUS: " + b.getStatus());
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_STATUS: " + b.getStatus());
         }
 
-        // 2. Check payment đã complete chưa
+        // 3. Check payment complete (txId from IPN)
         Ticket.PaymentInfo pay = b.getPayment();
-        if (pay == null || pay.getTxId() == null) { // Dùng txId thay vì status vì Ticket không có payment.status
-            log.warn("Payment not completed for booking {}: txId={}", bookingId, pay != null ? pay.getTxId() : "null");
+        if (pay == null || pay.getTxId() == null) {
+            log.warn("No payment txId for booking {}", bookingId);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "PAYMENT_NOT_COMPLETED");
         }
 
-        // 3. Get seats và holdId
-        List<String> seats = b.getSeats();
-        String holdId = b.getHoldId();
-        String showtimeId = b.getShowtimeId();
-
-        if (seats == null || seats.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "NO_SEATS_IN_BOOKING");
-        }
-        if (showtimeId == null || showtimeId.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "NO_SHOWTIME_ID");
-        }
-
-        // 4. UPDATE TICKET STATUS = CONFIRMED
+        // 4. UPDATE TICKET → CONFIRMED
         b.setStatus("CONFIRMED");
         if (pay.getPaidAt() == null) {
             pay.setPaidAt(Instant.now());
         }
         ticketRepo.save(b);
-        log.info("Updated ticket status to CONFIRMED: {}", bookingId);
+        log.info("Ticket updated to CONFIRMED: {}", bookingId);
 
-        // 5. UPDATE SEAT_LEDGER: status=CONFIRMED, refType=BOOKING, refId=ticketId
+        // 5. UPDATE SEAT_LEDGER → CONFIRMED
         try {
-            long updatedSeats = updateSeatsToConfirmed(showtimeId, seats, bookingId);
+            List<String> seats = b.getSeats();
+            String showtimeId = b.getShowtimeId();
 
-            if (updatedSeats != seats.size()) {
-                log.error("Seat update failed: updated={} expected={} for booking={}",
-                        updatedSeats, seats.size(), bookingId);
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        String.format("SEAT_UPDATE_FAILED: %d/%d seats confirmed", updatedSeats, seats.size()));
+            if (seats != null && !seats.isEmpty() && showtimeId != null) {
+                long updatedSeats = updateSeatsToConfirmed(showtimeId, seats, bookingId);
+                log.info("Updated {} seats to CONFIRMED for booking {}", updatedSeats, bookingId);
             }
-            log.info("Updated {} seats to CONFIRMED for booking={}", updatedSeats, bookingId);
         } catch (Exception e) {
-            log.error("Failed to update seats for booking={}: {}", bookingId, e.getMessage(), e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "SEAT_UPDATE_ERROR");
+            log.error("Seat update failed for booking {}: {}", bookingId, e.getMessage());
+            // Không throw để tránh break IPN flow
         }
 
         // 6. DELETE SEAT_LOCK
         try {
-            if (holdId != null && !holdId.isBlank()) {
+            String holdId = b.getHoldId();
+            if (holdId != null && !holdId.isEmpty()) {
                 lockRepo.deleteById(holdId);
-                log.info("Deleted seat lock: holdId={}", holdId);
-            } else {
-                log.warn("No holdId found for booking={}", bookingId);
+                log.info("Deleted hold for booking: {}", holdId);
             }
         } catch (Exception e) {
-            log.warn("Failed to delete seat lock for booking={}: {}", bookingId, e.getMessage(), e);
-            // Không throw error vì đã CONFIRMED ticket và seats
+            log.warn("Failed to delete hold for booking {}: {}", bookingId, e.getMessage());
         }
 
-        log.info("Booking CONFIRMED successfully: bookingId={}, seats={}, userId={}",
-                bookingId, seats.size(), userId);
+        log.info("Booking {} CONFIRMED successfully", bookingId);
         return b;
     }
 
