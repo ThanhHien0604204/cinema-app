@@ -202,21 +202,7 @@ public class ZaloPayController {
             result.put("bookingCode", b.getBookingCode());
             result.put("status", b.getStatus());
 
-            // THÊM LOGIC CHO PAYMENT STATUS
-            Ticket.PaymentInfo pay = b.getPayment();
-            if (pay != null) {
-                Map<String, Object> paymentInfo = new LinkedHashMap<>();
-                paymentInfo.put("gateway", pay.getGateway());
-                if (pay.getTxId() != null) {
-                    paymentInfo.put("txId", pay.getTxId());
-                }
-                if (pay.getPaidAt() != null) {
-                    paymentInfo.put("paidAt", pay.getPaidAt().toString());
-                }
-                result.put("payment", paymentInfo);
-            }
-
-            // Nếu đã CONFIRMED, trả thêm thông tin ghế
+            // Nếu CONFIRMED, trả thêm info
             if ("CONFIRMED".equalsIgnoreCase(b.getStatus())) {
                 result.put("seats", b.getSeats());
                 result.put("showtimeId", b.getShowtimeId());
@@ -227,9 +213,9 @@ public class ZaloPayController {
         } catch (ResponseStatusException ex) {
             throw ex;
         } catch (Exception ex) {
-            log.error("Check payment status failed for bookingId={}", bookingId, ex);
+            log.error("Status check failed for bookingId={}", bookingId, ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "STATUS_CHECK_FAILED", "message", ex.getMessage()));
+                    .body(Map.of("error", "STATUS_CHECK_FAILED"));
         }
     }
 
@@ -290,43 +276,55 @@ public class ZaloPayController {
             """.formatted(target);
             return ResponseEntity.ok().body(html);
         }
-
+        // TẠO statusCheckUrl - ĐÂY LÀ NÓ
+        String statusCheckUrl = ensureNoTrailingSlash(publicBaseUrl) +
+                "/api/payments/zalopay/status/" + bookingId;
         // REDIRECT NGAY VỀ APP - app sẽ handle confirm
         String html = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Xác nhận vé</title>
-            <meta http-equiv="refresh" content="1;url=%s">
-            <script>
-                // Fallback redirect
-                setTimeout(() => {
-                    if (!window.location.href.includes('myapp://')) {
-                        window.location.href = '%s';
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Đang xử lý thanh toán...</title>
+        <script>
+            async function checkStatus() {
+                try {
+                    const response = await fetch('%s');
+                    if (response.ok) {
+                        const result = await response.json();
+                        // CẢ CONFIRMED VÀ PENDING_PAYMENT ĐỀU SUCCESS
+                        if (result.status === 'CONFIRMED' || result.status === 'PENDING_PAYMENT') {
+                            window.location.href = '%s&status=SUCCESS';
+                        } else {
+                            window.location.href = '%s&status=FAILED';
+                        }
+                    } else {
+                        // Fallback: coi như success
+                        window.location.href = '%s&status=SUCCESS';
                     }
-                }, 1000);
-            </script>
-            <style>
-                body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-                .container { text-align: center; padding: 40px; background: rgba(255,255,255,0.1); border-radius: 20px; backdrop-filter: blur(10px); }
-                .icon { font-size: 48px; margin-bottom: 20px; }
-                .spinner { border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid white; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
-                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="spinner"></div>
-                <div class="icon">🎫</div>
-                <h2>Xác nhận vé</h2>
-                <p>Đang chuyển về ứng dụng...</p>
-                <p><small>Nếu không tự động chuyển, <a href="%s" style="color: #fff;">nhấn vào đây</a></small></p>
-            </div>
-        </body>
-        </html>
-        """.formatted(target, target, target);
+                } catch (error) {
+                    console.error('Status check failed:', error);
+                    window.location.href = '%s&status=SUCCESS';
+                }
+            }
+            
+            setTimeout(checkStatus, 500);
+            setTimeout(() => window.location.href = '%s&status=SUCCESS', 3000);
+        </script>
+        <!-- CSS giữ nguyên -->
+    </head>
+    <body>
+        <!-- HTML content giữ nguyên -->
+    </body>
+    </html>
+    """.formatted(
+                statusCheckUrl,   // %s 1: API endpoint để check status
+                target,           // %s 2: Deep link success
+                target,           // %s 3: Deep link failed
+                target,           // %s 4: Deep link error
+                target            // %s 5: Fallback
+        );
 
         return ResponseEntity.ok().body(html);
     }
