@@ -22,7 +22,9 @@ import org.springframework.web.server.ResponseStatusException;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class TicketService {
@@ -318,22 +320,22 @@ public class TicketService {
 
         Ticket b = ticketRepo.findByBookingCode(bookingCode)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
-
-        Ticket.PaymentInfo pay = b.getPayment();
-        if (pay == null) {
-            pay = new Ticket.PaymentInfo();
-            pay.setGateway("ZALOPAY");
-            b.setPayment(pay);
-        }
+//
+//        Ticket.PaymentInfo pay = b.getPayment();
+//        if (pay == null) {
+//            pay = new Ticket.PaymentInfo();
+//            pay.setGateway("ZALOPAY");
+//            b.setPayment(pay);
+//        }
 
         // Ghi zp_trans_id/txId
-        Object zptObj = parsed.get("zp_trans_id");
-        if (zptObj != null) {
-            String zpt = String.valueOf(zptObj);
-            pay.setTxId(zpt);
-            try { pay.setZpTransId(zpt); } catch (Throwable ignore) {}
-        }
-        pay.setRaw(parsed);
+//        Object zptObj = parsed.get("zp_trans_id");
+//        if (zptObj != null) {
+//            String zpt = String.valueOf(zptObj);
+//            pay.setTxId(zpt);
+//            try { pay.setZpTransId(zpt); } catch (Throwable ignore) {}
+//        }
+//        pay.setRaw(parsed);
 
         // Đọc status/amount từ IPN
         int statusFromZp = safeInt(parsed.get("status"), -1);
@@ -357,36 +359,53 @@ public class TicketService {
         }
 
         // THAY ĐỔI LOGIC: status=0 hoặc 1 đều CONFIRMED ngay
-        if (statusFromZp == 0 || statusFromZp == 1) {
-            // CẢ PENDING VÀ SUCCESS ĐỀU CONFIRMED NGAY LẬP TỨC
-            if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
-                b.setStatus("CONFIRMED");
-                pay.setPaidAt(Instant.now());
-                ticketRepo.save(b);
-
-                // Confirm ghế trong ledger
-                long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
-                if (updated != (b.getSeats() == null ? 0 : b.getSeats().size())) {
-                    throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_TAKEN_OR_HOLD_MISMATCH");
-                }
-
-                // Xóa hold
-                try { lockRepo.deleteById(b.getHoldId()); } catch (Throwable ignore) {}
-
-                log.info("IPN CONFIRMED: bookingId={}, statusFromZp={}, holdId={}, seats={}",
-                        b.getId(), statusFromZp, b.getHoldId(), b.getSeats());
+        if (statusFromZp == 0 || statusFromZp == 1) { // PENDING hoặc SUCCESS
+            // UPDATE PAYMENT INFO
+            Ticket.PaymentInfo pay = b.getPayment();
+            if (pay == null) {
+                pay = new Ticket.PaymentInfo();
+                pay.setGateway("ZALOPAY");
+                b.setPayment(pay);
             }
+
+            // Lưu transaction ID // Ghi zp_trans_id/txId
+            String zpTransId = String.valueOf(parsed.get("zp_trans_id"));
+            if (zpTransId != null) {
+                pay.setTxId(zpTransId);
+                pay.setZpTransId(zpTransId);
+            }
+            pay.setRaw(parsed);
+
+            // GIỮ PENDING_PAYMENT, KHÔNG CONFIRM NGAY
+            b.setStatus("PENDING_PAYMENT");
+            ticketRepo.save(b);
+
+            log.info("IPN PROCESSED (status={}): bookingId={} kept PENDING_PAYMENT, waiting for app callback",
+                    statusFromZp, b.getId());
+
+            // AUTO CONFIRM SAU 5 GIÂY (nếu user không quay về app)
+            scheduleDelayedConfirm(b.getId(), b.getUserId());
+
             return;
         }
 
-        // Các status còn lại (2, 3, ...) coi như fail
-        if (!"CONFIRMED".equalsIgnoreCase(b.getStatus())) {
-            b.setStatus("CANCELED");
-            ticketRepo.save(b);
-        }
-        log.debug("IPN not success (status={}) booking={} -> CANCELED", statusFromZp, bookingCode);
+        // FAILED statuses
+        b.setStatus("FAILED");
+        ticketRepo.save(b);
+        log.warn("IPN FAILED (status={}): bookingId={}", statusFromZp, b.getId());
     }
-
+    private void scheduleDelayedConfirm(String bookingId, String userId) {
+        // Lên lịch confirm sau 5s nếu user không quay về app
+        CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
+                .execute(() -> {
+                    try {
+                        log.info("Auto confirming booking after timeout: {}", bookingId);
+                        confirmBookingFromPending(bookingId, userId);
+                    } catch (Exception e) {
+                        log.error("Delayed confirm failed for booking {}: {}", bookingId, e.getMessage());
+                    }
+                });
+    }
     /**
      * Hủy booking và refund nếu cần
      * @param bookingId ticket ID
