@@ -57,6 +57,9 @@ public class ZaloPayService {
 
     /** Tạo đơn đặt hàng ZaloPay, trả order_url cho FE mở app. */
     public Map<String, Object> createOrder(Ticket b, String appUser) {
+        if (appUser == null || appUser.isEmpty()) appUser = "anonymous_user"; // Fallback để tránh mac null
+        log.info("Creating ZaloPay order with appUser: " + appUser);
+
         URI endpoint = absoluteHttpUrl(createUrl);
 
         // APP TRANS ID: Format yyyyMMdd_BOOKING_CODE

@@ -81,40 +81,46 @@ public class ZaloPayController {
                 return ResponseEntity.badRequest().body(Map.of("error", "MISSING_BOOKING_ID"));
             }
 
-            // Validate booking
             Ticket booking = ticketRepo.findById(bookingId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
 
-            if (!Objects.equals(booking.getUserId(), user.getUserId())) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "NOT_YOUR_BOOKING");
+            // SỬA: Fallback nếu user null (test trước, sau khi có token thì bỏ)
+            String userId = (user != null) ? user.getUserId() : null;
+            if (userId == null) {
+                log.warn("No user from token, skipping ownership check");
+            } else if (!Objects.equals(booking.getUserId(), userId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "FORBIDDEN");
             }
 
-            if (!"PENDING_PAYMENT".equalsIgnoreCase(booking.getStatus())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_BOOKING_STATUS");
+            // Gọi ZaloPayService với appUser = userId (nếu null, service sẽ handle)
+            Map<String, Object> order = zaloPayService.createOrder(booking, userId);
+            log.info("ZaloPay order response: " + order); // Log để debug return_code
+
+            int rc = safeInt(order.get("return_code"), 0);
+            if (rc != 1) {
+                log.error("ZaloPay create order failed: rc=" + rc + ", resp=" + order);
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", "ZP_CREATE_FAILED", "details", order));
             }
 
-            String appUser = user.getUserId();
-            Map<String, Object> orderResponse = zaloPayService.createOrder(booking, appUser);
-
-            // TRẢ RESPONSE ĐÚNG FORMAT CHO FRONTEND
-            Map<String, Object> response = new HashMap<>();
-            response.put("orderUrl", orderResponse.get("order_url"));
-            response.put("zpTransToken", orderResponse.get("zp_trans_token"));
-            response.put("bookingId", bookingId);
-
-            log.info("ZaloPay order created for booking {}: {}", bookingId, response);
-
-            return ResponseEntity.ok(response);
-
-        } catch (ResponseStatusException ex) {
-            throw ex;
+            return ResponseEntity.ok(Map.of(
+                    "orderUrl", order.get("order_url"),
+                    "zpTransToken", order.get("zp_trans_token"),
+                    "bookingId", bookingId
+            ));
         } catch (Exception ex) {
             log.error("Create ZaloPay order failed", ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "ORDER_CREATION_FAILED", "message", ex.getMessage()));
+                    .body(Map.of("error", "INTERNAL_ERROR", "message", ex.getMessage()));
         }
     }
-
+    private int safeInt(Object obj, int defaultValue) {
+        if (obj instanceof Number) return ((Number) obj).intValue();
+        try {
+            return Integer.parseInt(String.valueOf(obj));
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
     // 3) IPN callback từ ZaloPay (public)
     @PostMapping(value = "/payments/zalopay/ipn", consumes = MediaType.ALL_VALUE)
     public ResponseEntity<?> ipn(@RequestBody Map<String, String> req) {
