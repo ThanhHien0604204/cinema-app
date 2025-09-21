@@ -11,6 +11,7 @@ import java.util.Collection;
 import java.util.List;
 
 public interface ShowtimeRepository extends MongoRepository<Showtime, String> {
+    List<Showtime> findByMovieId(String movieId);
     //tìm theo ID phim và bắt đầu ở giữa
     Page<Showtime> findByMovieIdInAndStartAtBetween(
             Collection<String> movieIds, Instant from, Instant to, Pageable p);

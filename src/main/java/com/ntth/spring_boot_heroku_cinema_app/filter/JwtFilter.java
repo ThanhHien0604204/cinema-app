@@ -2,7 +2,6 @@ package com.ntth.spring_boot_heroku_cinema_app.filter;
 
 import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
-import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,9 +30,10 @@ public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtProvider jwtProvider;
     // Optional: dùng để lấy userId & role từ DB (đúng với log của bạn: findByEmail)
-    private final UserRepository userRepository;  // ← Bỏ @Nullable
+    private final @Nullable UserRepository userRepository;
 
-    public JwtFilter(JwtProvider jwtProvider, UserRepository userRepository) {  // ← Bỏ @Nullable
+    public JwtFilter(JwtProvider jwtProvider,
+                     @Nullable UserRepository userRepository) {
         this.jwtProvider = jwtProvider;
         this.userRepository = userRepository;
     }
@@ -49,46 +49,46 @@ public class JwtFilter extends OncePerRequestFilter {
             if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
                 String token = bearer.substring(7);
 
-                // 1) Kiểm tra token hợp lệ
+                // 1) validate token
                 if (jwtProvider.validateToken(token)) {
 
-                    // 2) Lấy email từ token
+                    // 2) lấy email (subject)
                     String email = jwtProvider.getEmailFromToken(token);
 
-                    // 3) Nếu chưa có Authentication thì thiết lập
+                    // 3) nếu chưa có Authentication thì set
                     Authentication existing = SecurityContextHolder.getContext().getAuthentication();
                     if (existing == null) {
 
-                        // 3a) Tìm user trong database
-                        Optional<User> optionalUser = userRepository.findByEmail(email);
-                        if (optionalUser.isPresent()) {
-                            User user = optionalUser.get();
+                        // 3a) Lấy user từ DB (để có _id và role)
+                        String userId = email; // fallback
+                        String role = "USER";  // fallback
+                        String password = "";  // fallback
 
-                            // 3b) Tạo JwtUser thay vì CustomUserDetails
-                            JwtUser principal = new JwtUser(
-                                    user.getId(),
-                                    user.getUserName(), // hoặc tên field tương ứng trong User entity
-                                    user.getEmail(),
-                                    user.getRole(),
-                                    user.getPassword() // có thể để null nếu không cần password
-                            );
-
-                            // 3c) Tạo authorities từ role
-                            List<SimpleGrantedAuthority> authorities =
-                                    List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole()));
-
-                            // 3d) Thiết lập Authentication
-                            UsernamePasswordAuthenticationToken authToken =
-                                    new UsernamePasswordAuthenticationToken(principal, null, authorities);
-                            authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                            SecurityContextHolder.getContext().setAuthentication(authToken);
-
-                            if (log.isDebugEnabled()) {
-                                log.debug("✅ Xác thực thành công: email={}, userId={}, role={}",
-                                        email, user.getId(), user.getRole());
+                        if (userRepository != null) {
+                            Optional<User> u = userRepository.findByEmail(email);
+                            if (u.isPresent()) {
+                                userId = String.valueOf(u.get().getId());
+                                role = u.get().getRole().toUpperCase(Locale.ROOT);
+                                password = u.get().getPassword();  // ← THÊM: Lấy password (mã hóa)
+                            } else {
+                                log.debug("Không tìm thấy người dùng qua email={}, tiếp tục với phương án dự phòng", email);
                             }
-                        } else {
-                            log.warn("❌ Không tìm thấy user với email: {}", email);
+                        }
+                        // 3b) principal kiểu JwtUser để @AuthenticationPrincipal dùng được
+                        JwtUser principal = new JwtUser(userId, email, email, role, password);
+
+                        // 3c) authorities từ role
+                        List<SimpleGrantedAuthority> authorities =
+                                List.of(new SimpleGrantedAuthority("ROLE_" + role));
+
+                        UsernamePasswordAuthenticationToken authToken =
+                                new UsernamePasswordAuthenticationToken(principal, null, authorities);
+                        authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                        SecurityContextHolder.getContext().setAuthentication(authToken);
+
+                        if (log.isDebugEnabled()) {
+                            log.debug("Yêu cầu đã xác thực: email={}, userId={}, role={}", email, userId, role);
                         }
                     }
                 } else {
@@ -96,6 +96,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 }
             }
         } catch (Exception e) {
+            // không chặn request, chỉ log cho dễ debug
             log.error("Lỗi bộ lọc JWT: {}", e.getMessage(), e);
         }
 

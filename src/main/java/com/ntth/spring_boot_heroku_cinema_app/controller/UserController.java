@@ -159,26 +159,23 @@ public class UserController {
     @PutMapping("/users/me")
     public PublicUserResponse updateMe(@Valid @RequestBody UpdateUserRequest req,
                                        @AuthenticationPrincipal JwtUser me) {
-        if (me == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
-        }
-        User u = userRepo.findById(me.getUserId())
+        if (me == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        String userId = me.getUserId();
+
+        User u = userRepo.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
-        // userName
         if (req.userName != null) {
             String name = req.userName.trim();
             if (!name.isEmpty()) u.setUserName(name);
         }
-
-        // email (nếu đổi email -> kiểm tra trùng)
         if (req.email != null) {
             String emailNew = req.email.trim().toLowerCase();
             if (!emailNew.equalsIgnoreCase(u.getEmail())) {
                 if (userRepo.existsByEmail(emailNew))
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "Email đã được sử dụng");
                 u.setEmail(emailNew);
-                // Lưu ý: JWT của bạn dùng subject=email. Sau khi đổi email, token cũ sẽ không hợp lệ -> client nên đăng nhập lại.
+                // Nếu JWT dùng sub=email: app nên logout hoặc nhận token mới
             }
         }
         userRepo.save(u);
@@ -188,22 +185,23 @@ public class UserController {
     @PatchMapping(value = "/users/me/password", consumes = "application/json")
     public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
                                                @AuthenticationPrincipal JwtUser me) {
-        if (me == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
-        }
-        User u = userRepo.findById(me.getUserId())
+        if (me == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+
+        String userId = me.getUserId();
+        User u = userRepo.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
         if (!req.newPassword.equals(req.confirmNewPassword)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Xác nhận mật khẩu không khớp");
         }
-        if (u.getPassword() == null || u.getPassword().isBlank()
-                || !passwordEncoder.matches(req.currentPassword, u.getPassword())) {
+        String encoded = u.getPassword();
+        if (encoded == null || encoded.isBlank() || !passwordEncoder.matches(req.currentPassword, encoded)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu hiện tại không đúng");
         }
-        if (passwordEncoder.matches(req.newPassword, u.getPassword())) {
+        if (passwordEncoder.matches(req.newPassword, encoded)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mật khẩu mới không được trùng mật khẩu cũ");
         }
+
         u.setPassword(passwordEncoder.encode(req.newPassword));
         userRepo.save(u);
         return ResponseEntity.noContent().build();

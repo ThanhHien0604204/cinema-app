@@ -1,11 +1,12 @@
 package com.ntth.spring_boot_heroku_cinema_app.controller;
 
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
+import com.ntth.spring_boot_heroku_cinema_app.pojo.Showtime;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
+import com.ntth.spring_boot_heroku_cinema_app.repository.ShowtimeRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repository.TicketRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
 import com.ntth.spring_boot_heroku_cinema_app.service.TicketService;
-import com.ntth.spring_boot_heroku_cinema_app.service.ZaloPayService;
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -40,6 +40,8 @@ public class TicketController {
     private TicketRepository ticketRepo;
     @Autowired
     private MongoTemplate mongo;
+    @Autowired
+    private ShowtimeRepository showtimeRepo;
 
     private static final Logger log = LoggerFactory.getLogger(TicketController.class);
 
@@ -98,53 +100,16 @@ public class TicketController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<?> getMyTickets(
-            Authentication auth,
+    public ResponseEntity<Page<Ticket>> getMyTickets(
+            Authentication auth,  // Lấy userId từ JwtUser
             @RequestParam(defaultValue = "CONFIRMED") String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
-        try {
-            log.info("GET /api/bookings/me - page: {}, size: {}, status: {}", page, size, status);
-
-            // Kiểm tra authentication
-            if (auth == null || !auth.isAuthenticated()) {
-                log.warn("Unauthenticated access to /api/bookings/me");
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-            }
-
-            // Lấy userId từ JwtUser
-            String userId = null;
-            Object principal = auth.getPrincipal();
-
-            if (principal instanceof JwtUser) {
-                userId = ((JwtUser) principal).getUserId();
-                log.debug("UserId from JwtUser: {}", userId);
-            } else if (principal instanceof String) {
-                // Fallback cho username (email)
-                userId = (String) principal;
-                log.debug("UserId from String principal: {}", userId);
-            } else {
-                log.warn("Unknown principal type: {}", principal != null ? principal.getClass() : "null");
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-            }
-
-            if (userId == null || userId.isEmpty()) {
-                log.warn("Cannot extract userId from authentication");
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-            }
-
-            Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-            Page<Ticket> tickets = ticketRepo.findByUserIdAndStatus(userId, status, pageable);
-
-            log.info("Found {} tickets for user: {}", tickets.getTotalElements(), userId);
-            return ResponseEntity.ok(tickets);
-
-        } catch (Exception e) {
-            log.error("Error in getMyTickets: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Internal server error"));
-        }
+        String userId = ((JwtUser) auth.getPrincipal()).getUserId();  // Từ JwtFilter
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Ticket> tickets = ticketRepo.findByUserIdAndStatus(userId, status, pageable);
+        return ResponseEntity.ok(tickets);  // Trả Page<Ticket> với nested PaymentInfo
     }
 
     // (tuỳ chọn) lấy theo bookingCode – tiện cho CSKH
@@ -175,30 +140,24 @@ public class TicketController {
             @RequestParam(value = "movieId", required = false) String movieId,
             @AuthenticationPrincipal JwtUser me
     ) {
-        if (me == null) return ResponseEntity.status(401).build();
-        String userId = me.getUserId(); // hoặc getId() tuỳ JwtUser của bạn
+        if (me == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        String userId = me.getUserId();
 
         if (movieId == null || movieId.isBlank()) {
             return ResponseEntity.ok(ticketRepo.findByUserIdOrderByCreatedAtDesc(userId));
         }
 
-        List<String> showtimeIds = findShowtimeIdsByMovieId(movieId);
+        List<String> showtimeIds = findShowtimeIdsByMovieId(movieId); // helper dưới
         if (showtimeIds.isEmpty()) return ResponseEntity.ok(List.of());
 
-        List<Ticket> out = ticketRepo.findByUserIdAndShowtimeIdInOrderByCreatedAtDesc(userId, showtimeIds);
-        return ResponseEntity.ok(out);
+        return ResponseEntity.ok(
+                ticketRepo.findByUserIdAndShowtimeIdInOrderByCreatedAtDesc(userId, showtimeIds)
+        );
     }
 
-    /** Hàm trợ giúp: lấy danh sách _id của collection "showtime" theo movieId */
     private List<String> findShowtimeIdsByMovieId(String movieId) {
-        Query q = new Query(Criteria.where("movieId").is(movieId));
-        q.fields().include("_id"); // chỉ cần _id cho nhanh
-        // nếu collection của bạn tên "showtimes" thì đổi chuỗi bên dưới
-        List<Document> docs = mongo.find(q, Document.class, "showtime");
-        return docs.stream()
-                .map(d -> ((org.bson.Document) d).get("_id"))
-                .filter(Objects::nonNull)
-                .map(id -> (id instanceof ObjectId oid) ? oid.toHexString() : id.toString())
-                .collect(Collectors.toList());
+        List<String> showtimeIds = showtimeRepo.findByMovieId(movieId)
+                .stream().map(Showtime::getId).toList();
+        return showtimeIds;
     }
 }
