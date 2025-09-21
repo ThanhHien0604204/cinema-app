@@ -188,30 +188,17 @@ public class TicketService {
      * Free confirmed seats
      */
     @Transactional
-    public long freeConfirmedSeats(String showtimeId, List<String> seats, String bookingId) {
-        // Build query cho confirmed seats
-        Query query = new Query();
-        query.addCriteria(Criteria.where("showtimeId").is(showtimeId));
-        query.addCriteria(Criteria.where("seatNumber").in(seats));
-        query.addCriteria(Criteria.where("status").is("CONFIRMED"));
-        query.addCriteria(Criteria.where("refType").is("BOOKING"));
-        query.addCriteria(Criteria.where("refId").is(bookingId));
-
-        // Count seats để validate
-        long totalSeats = mongo.count(query, SeatLedger.class);
-
-        // Build update để free seats
-        Update update = new Update();
-        update.set("status", "FREE");
-        update.set("refType", null);
-        update.set("refId", null);
-        update.unset("expiresAt");
-
-        // FIX: updateMulti với đúng signature
-        long updated = mongo.updateMulti(query, update, SeatLedger.class).getModifiedCount();
-
-        log.info("Freed {} confirmed seats for booking={}", updated, bookingId);
-        return updated;
+    private long freeConfirmedSeats(String showtimeId, List<String> seats, String bookingId) {
+        Query query = new Query(Criteria.where("showtimeId").is(showtimeId)
+                .and("seatNumber").in(seats)
+                .and("status").is("CONFIRMED")
+                .and("refType").is("BOOKING")
+                .and("refId").is(null));
+        Update update = new Update().set("status", "FREE")
+                .set("refType", null)
+                .set("refId", null)
+                .unset("expiresAt");
+        return mongo.updateMulti(query, update, "seat_ledger").getModifiedCount();
     }
     /**
      * Tạo booking từ 1 hold có sẵn:
@@ -260,7 +247,9 @@ public class TicketService {
             booking.setPayment(payment);
 
             // Confirm ledger using MongoTemplate
+            log.info("Confirming seats for showtime: " + hold.getShowtimeId() + ", seats: " + hold.getSeats() + ", bookingId: " + booking.getId());
             long confirmed = freeConfirmedSeats(hold.getShowtimeId(), hold.getSeats(), booking.getId());
+            log.info("Confirmed seats count: " + confirmed + ", expected: " + hold.getSeats().size());
             if (confirmed != hold.getSeats().size()) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_CONFIRM_FAILED");
             }

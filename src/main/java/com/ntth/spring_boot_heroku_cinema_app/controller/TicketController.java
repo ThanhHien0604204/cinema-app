@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -87,7 +88,10 @@ public class TicketController {
         res.put("bookingCode", b.getBookingCode());
         res.put("status", b.getStatus());
         res.put("showtimeId", b.getShowtimeId());
-        try { res.put("amount", b.getAmount()); } catch (Throwable ignore) {}
+        try {
+            res.put("amount", b.getAmount());
+        } catch (Throwable ignore) {
+        }
         res.put("seats", b.getSeats());
         try {
             Map<String, Object> pay = new LinkedHashMap<>();
@@ -95,21 +99,75 @@ public class TicketController {
                 pay.put("gateway", b.getPayment().getGateway());
             }
             res.put("payment", pay);
-        } catch (Throwable ignore) {}
+        } catch (Throwable ignore) {
+        }
         return res;
     }
 
+    //    @GetMapping("/me")
+//    public ResponseEntity<Page<Ticket>> getMyTickets(
+//            Authentication auth,  // Lấy userId từ JwtUser
+//            @RequestParam(defaultValue = "CONFIRMED") String status,
+//            @RequestParam(defaultValue = "0") int page,
+//            @RequestParam(defaultValue = "10") int size) {
+//
+//        String userId = ((JwtUser) auth.getPrincipal()).getUserId();  // Từ JwtFilter
+//        Pageable pageable = PageRequest.of(page, size);
+//        Page<Ticket> tickets = ticketRepo.findByUserIdAndStatus(userId, status, pageable);
+//        return ResponseEntity.ok(tickets);  // Trả Page<Ticket> với nested PaymentInfo
+//    }
     @GetMapping("/me")
-    public ResponseEntity<Page<Ticket>> getMyTickets(
-            Authentication auth,  // Lấy userId từ JwtUser
+    public ResponseEntity<?> getMyTickets(
+            Authentication auth,
             @RequestParam(defaultValue = "CONFIRMED") String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
-        String userId = ((JwtUser) auth.getPrincipal()).getUserId();  // Từ JwtFilter
-        Pageable pageable = PageRequest.of(page, size);
-        Page<Ticket> tickets = ticketRepo.findByUserIdAndStatus(userId, status, pageable);
-        return ResponseEntity.ok(tickets);  // Trả Page<Ticket> với nested PaymentInfo
+        log.info("GET /api/bookings/me - page: {}, size: {}, status: {}", page, size, status);
+
+        try {
+            // ✅ KIỂM TRA AUTHENTICATION
+            if (auth == null || !auth.isAuthenticated()) {
+                log.warn("Unauthenticated access to /api/bookings/me");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            }
+
+            Object principal = auth.getPrincipal();
+            log.debug("Principal type: {}", principal != null ? principal.getClass().getSimpleName() : "null");
+
+            // ✅ KIỂM TRA JWTUSER
+            if (!(principal instanceof JwtUser)) {
+                log.warn("Expected JwtUser but got: {}", principal != null ? principal.getClass().getSimpleName() : "null");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            }
+
+            JwtUser jwtUser = (JwtUser) principal;
+            String userId = jwtUser.getUserId();
+
+            // ✅ KIỂM TRA USERID
+            if (userId == null || userId.isEmpty()) {
+                log.warn("UserId is null or empty from JwtUser: {}", jwtUser.getEmail());
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            }
+
+            log.debug("Resolved userId: {} (email: {})", userId, jwtUser.getEmail());
+
+            // ✅ TẠO PAGEABLE VỚI SORT
+            Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+
+            // ✅ QUERY TICKETS
+            Page<Ticket> tickets = ticketRepo.findByUserIdAndStatus(userId, status, pageable);
+
+            log.info("Found {} tickets for user: {} (status: {})",
+                    tickets.getTotalElements(), userId, status);
+
+            return ResponseEntity.ok(tickets);
+
+        } catch (Exception e) {
+            log.error("Error in getMyTickets: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Internal server error"));
+        }
     }
 
     // (tuỳ chọn) lấy theo bookingCode – tiện cho CSKH
@@ -130,10 +188,14 @@ public class TicketController {
         res.put("bookingCode", b.getBookingCode());
         res.put("status", b.getStatus());
         res.put("showtimeId", b.getShowtimeId());
-        try { res.put("amount", b.getAmount()); } catch (Throwable ignore) {}
+        try {
+            res.put("amount", b.getAmount());
+        } catch (Throwable ignore) {
+        }
         res.put("seats", b.getSeats());
         return res;
     }
+
     //Lấy vé của CHÍNH TÔI
     @GetMapping("/user/me")
     public ResponseEntity<List<Ticket>> getMyTickets(
