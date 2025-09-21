@@ -28,7 +28,7 @@ public class ZaloPayService {
     private static final Logger log = LoggerFactory.getLogger(ZaloPayService.class);
     private static final DateTimeFormatter YYMMDD = DateTimeFormatter.ofPattern("yyMMdd");
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${zalopay.appId}")
@@ -54,11 +54,18 @@ public class ZaloPayService {
 
     @Value("${app.deeplink:}")  // ví dụ: myapp://zp-callback
     private String deeplinkBase;
-
+    public ZaloPayService() {
+        // Khởi tạo RestTemplate với timeout tùy chỉnh
+        this.restTemplate = new RestTemplate();
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(30000); // 30 giây
+        factory.setReadTimeout(30000);    // 30 giây
+        this.restTemplate.setRequestFactory(factory);
+    }
     /** Tạo đơn đặt hàng ZaloPay, trả order_url cho FE mở app. */
     public Map<String, Object> createOrder(Ticket b, String appUser) {
         if (appUser == null || appUser.isEmpty()) appUser = "anonymous_user"; // Fallback để tránh mac null
-        log.info("Creating ZaloPay order with appUser: " + appUser);
+        log.info("Creating ZaloPay order with appUser: " + appUser+ ", bookingId: " + b.getId());
 
         URI endpoint = absoluteHttpUrl(createUrl);
 
