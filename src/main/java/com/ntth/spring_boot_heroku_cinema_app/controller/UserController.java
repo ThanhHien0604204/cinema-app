@@ -3,6 +3,7 @@ package com.ntth.spring_boot_heroku_cinema_app.controller;
 import com.mongodb.MongoException;
 import com.ntth.spring_boot_heroku_cinema_app.dto.*;
 import com.ntth.spring_boot_heroku_cinema_app.filter.JwtProvider;
+import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
@@ -106,19 +107,11 @@ public class UserController {
 
     @GetMapping("/user/me")
     public ResponseEntity<User> getCurrentUser(@RequestHeader("Authorization") String token) {
-        try {
-            if (!token.startsWith("Bearer ")) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token phải bắt đầu bằng 'Bearer '");
-            }
-            String email = jwtProvider.getEmailFromToken(token.replace("Bearer ", ""));
-            User user = userRepo.findByEmail(email)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                            "Không tìm thấy người dùng với email: " + email));
-            return ResponseEntity.ok(user);
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Lỗi xác thực: " + e.getMessage());
-        }
+        // Xác thực token
+        String email = jwtProvider.getEmailFromToken(token.replace("Bearer ", ""));
+        User user = userRepo.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy người dùng"));
+        return ResponseEntity.ok(user);
     }
 
     @GetMapping("/users/{userId}")
@@ -164,12 +157,14 @@ public class UserController {
 
     // 1) Cập nhật thông tin người dùng hiện tại (userName, email)
     @PutMapping("/users/me")
-    public ResponseEntity<PublicUserResponse> updateMe(@Valid @RequestBody UpdateUserRequest req,
-                                                       @AuthenticationPrincipal CustomUserDetails me) {
-        User u = userRepo.findById(me.getUser().getId())
+    public PublicUserResponse updateMe(@Valid @RequestBody UpdateUserRequest req,
+                                       @AuthenticationPrincipal JwtUser me) {
+        if (me == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+        User u = userRepo.findById(me.getUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
-        boolean emailChanged = false;
         // userName
         if (req.userName != null) {
             String name = req.userName.trim();
@@ -183,25 +178,20 @@ public class UserController {
                 if (userRepo.existsByEmail(emailNew))
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "Email đã được sử dụng");
                 u.setEmail(emailNew);
-                emailChanged = true;
+                // Lưu ý: JWT của bạn dùng subject=email. Sau khi đổi email, token cũ sẽ không hợp lệ -> client nên đăng nhập lại.
             }
         }
         userRepo.save(u);
-        PublicUserResponse response = PublicUserResponse.of(u);
-        if (emailChanged) {
-            // Thêm thông báo trong phản hồi
-            //response.setMessage("Email đã được thay đổi. Vui lòng đăng nhập lại để nhận token mới.");
-        }
-        return ResponseEntity.ok(response);
+        return PublicUserResponse.of(u);
     }
     // 2) Đổi mật khẩu người dùng hiện tại
     @PatchMapping(value = "/users/me/password", consumes = "application/json")
     public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
-                                               @AuthenticationPrincipal CustomUserDetails me) {
+                                               @AuthenticationPrincipal JwtUser me) {
         if (me == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
         }
-        User u = userRepo.findById(me.getUser().getId())
+        User u = userRepo.findById(me.getUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
         if (!req.newPassword.equals(req.confirmNewPassword)) {
@@ -226,7 +216,12 @@ public class UserController {
         }
         Object principal = auth.getPrincipal();
 
-        // Trường hợp bạn dùng CustomUserDetails
+        // Thêm hỗ trợ cho JwtUser
+        if (principal instanceof JwtUser jwtUser) {
+            return jwtUser.getUserId();
+        }
+
+        // Trường hợp bạn dùng CustomUserDetails (nếu vẫn giữ)
         if (principal instanceof com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails cud) {
             return cud.getUser().getId();
         }
