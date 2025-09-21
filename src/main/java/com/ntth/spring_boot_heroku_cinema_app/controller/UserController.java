@@ -106,11 +106,19 @@ public class UserController {
 
     @GetMapping("/user/me")
     public ResponseEntity<User> getCurrentUser(@RequestHeader("Authorization") String token) {
-        // Xác thực token
-        String email = jwtProvider.getEmailFromToken(token.replace("Bearer ", ""));
-        User user = userRepo.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy người dùng"));
-        return ResponseEntity.ok(user);
+        try {
+            if (!token.startsWith("Bearer ")) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token phải bắt đầu bằng 'Bearer '");
+            }
+            String email = jwtProvider.getEmailFromToken(token.replace("Bearer ", ""));
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                            "Không tìm thấy người dùng với email: " + email));
+            return ResponseEntity.ok(user);
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Lỗi xác thực: " + e.getMessage());
+        }
     }
 
     @GetMapping("/users/{userId}")
@@ -156,11 +164,12 @@ public class UserController {
 
     // 1) Cập nhật thông tin người dùng hiện tại (userName, email)
     @PutMapping("/users/me")
-    public PublicUserResponse updateMe(@Valid @RequestBody UpdateUserRequest req,
-                                       @AuthenticationPrincipal CustomUserDetails me) {
+    public ResponseEntity<PublicUserResponse> updateMe(@Valid @RequestBody UpdateUserRequest req,
+                                                       @AuthenticationPrincipal CustomUserDetails me) {
         User u = userRepo.findById(me.getUser().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
+        boolean emailChanged = false;
         // userName
         if (req.userName != null) {
             String name = req.userName.trim();
@@ -174,13 +183,17 @@ public class UserController {
                 if (userRepo.existsByEmail(emailNew))
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "Email đã được sử dụng");
                 u.setEmail(emailNew);
-                // Lưu ý: JWT của bạn dùng subject=email. Sau khi đổi email, token cũ sẽ không hợp lệ -> client nên đăng nhập lại.
+                emailChanged = true;
             }
         }
         userRepo.save(u);
-        return PublicUserResponse.of(u);
+        PublicUserResponse response = PublicUserResponse.of(u);
+        if (emailChanged) {
+            // Thêm thông báo trong phản hồi
+            //response.setMessage("Email đã được thay đổi. Vui lòng đăng nhập lại để nhận token mới.");
+        }
+        return ResponseEntity.ok(response);
     }
-
     // 2) Đổi mật khẩu người dùng hiện tại
     @PatchMapping(value = "/users/me/password", consumes = "application/json")
     public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,

@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.lang.Nullable;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -18,6 +19,7 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.util.List;
@@ -43,7 +45,6 @@ public class JwtFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
-
         try {
             String bearer = request.getHeader("Authorization");
             if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
@@ -51,49 +52,51 @@ public class JwtFilter extends OncePerRequestFilter {
 
                 // 1) validate token
                 if (jwtProvider.validateToken(token)) {
-
                     // 2) lấy email (subject)
                     String email = jwtProvider.getEmailFromToken(token);
 
                     // 3) nếu chưa có Authentication thì set
                     Authentication existing = SecurityContextHolder.getContext().getAuthentication();
-                    if (existing == null) {
-
+                    if (existing == null || !existing.isAuthenticated()) {
                         // 3a) Lấy user từ DB
-                        Optional<User> optionalUser = userRepository.findByEmail(email);
-                        if (optionalUser.isPresent()) {
-                            User user = optionalUser.get();
+                        User user = userRepository.findByEmail(email)
+                                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                                        "Không tìm thấy người dùng với email: " + email));
 
-                            // 3b) Tạo CustomUserDetails thay vì JwtUser
-                            CustomUserDetails principal = new CustomUserDetails(user);
+                        // 3b) Tạo CustomUserDetails
+                        CustomUserDetails principal = new CustomUserDetails(user);
 
-                            // 3c) authorities từ role
-                            List<SimpleGrantedAuthority> authorities =
-                                    List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole()));
+                        // 3c) authorities từ role
+                        List<SimpleGrantedAuthority> authorities =
+                                List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole()));
 
-                            UsernamePasswordAuthenticationToken authToken =
-                                    new UsernamePasswordAuthenticationToken(principal, null, authorities);
-                            authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        UsernamePasswordAuthenticationToken authToken =
+                                new UsernamePasswordAuthenticationToken(principal, null, authorities);
+                        authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                            SecurityContextHolder.getContext().setAuthentication(authToken);
+                        SecurityContextHolder.getContext().setAuthentication(authToken);
 
-                            if (log.isDebugEnabled()) {
-                                log.debug("✅ Xác thực thành công: email={}, userId={}, role={}",
-                                        email, user.getId(), user.getRole());
-                            }
-                        } else {
-                            log.warn("❌ Không tìm thấy user với email: {}", email);
+                        if (log.isDebugEnabled()) {
+                            log.debug("✅ Xác thực thành công: email={}, userId={}, role={}",
+                                    email, user.getId(), user.getRole());
                         }
                     }
                 } else {
                     log.debug("JWT không hợp lệ hoặc đã hết hạn");
+                    response.setStatus(HttpStatus.UNAUTHORIZED.value());
+                    response.getWriter().write("{\"error\": \"JWT không hợp lệ hoặc đã hết hạn\"}");
+                    return;
                 }
             }
+            filterChain.doFilter(request, response);
+        } catch (ResponseStatusException e) {
+            log.error("Lỗi xác thực: {}", e.getMessage());
+            response.setStatus(e.getStatusCode().value());
+            response.getWriter().write("{\"error\": \"" + e.getReason() + "\"}");
         } catch (Exception e) {
-            // không chặn request, chỉ log cho dễ debug
             log.error("Lỗi bộ lọc JWT: {}", e.getMessage(), e);
+            response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
+            response.getWriter().write("{\"error\": \"Lỗi server: " + e.getMessage() + "\"}");
         }
-
-        filterChain.doFilter(request, response);
     }
 }
