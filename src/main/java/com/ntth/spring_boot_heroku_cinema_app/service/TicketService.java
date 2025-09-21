@@ -229,6 +229,7 @@ public class TicketService {
      */
     @Transactional
     public Ticket createBookingFromHold(String holdId, String userId, String method) {
+        log.info("Creating booking from holdId: " + holdId + ", userId: " + userId + ", method: " + method);
         // 1. Kiểm tra hold
         SeatLock hold = lockRepo.findById(holdId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "HOLD_NOT_FOUND"));

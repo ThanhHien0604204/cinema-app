@@ -6,6 +6,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,4 +25,9 @@ public interface TicketRepository extends MongoRepository<Ticket, String> {
 
     // Nếu cần tìm theo user + id để bảo toàn quyền truy cập
     Optional<Ticket> findByIdAndUserId(String id, String userId);
+
+    List<Ticket> findByUserIdOrderByCreatedAtDesc(String userId);
+
+    List<Ticket> findByUserIdAndShowtimeIdInOrderByCreatedAtDesc(String userId, Collection<String> showtimeIds);
+
 }

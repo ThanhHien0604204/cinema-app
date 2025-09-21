@@ -123,6 +123,7 @@ public class SpringSecurityConfigs {
                                 "/api/showtimes/{showtimeId}/hold"
                         ).authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/users/me").authenticated()
+                        .requestMatchers(HttpMethod.GET,   "/api/bookings/user/me").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/users/me/password").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/bookings/{id}/cancel").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/reviews/{id}").authenticated()

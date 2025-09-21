@@ -58,8 +58,8 @@ public class ZaloPayService {
         // Khởi tạo RestTemplate với timeout tùy chỉnh
         this.restTemplate = new RestTemplate();
         org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(30000); // 30 giây
-        factory.setReadTimeout(30000);    // 30 giây
+        factory.setConnectTimeout(60000); // 60 giây
+        factory.setReadTimeout(60000);
         this.restTemplate.setRequestFactory(factory);
     }
     /** Tạo đơn đặt hàng ZaloPay, trả order_url cho FE mở app. */
@@ -96,8 +96,10 @@ public class ZaloPayService {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
+        log.info("Sending ZaloPay request to " + endpoint + ", body: " + toJson(req)); // Log trước khi gửi
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(req, headers);
         ResponseEntity<Map> res = restTemplate.postForEntity(endpoint, entity, Map.class);
+        log.info("ZaloPay API response: status=" + res.getStatusCode() + ", body=" + res.getBody()); // Log sau khi nhận
 
         if (!res.getStatusCode().is2xxSuccessful() || res.getBody() == null) {
             log.error("ZaloPay create order failed: {}", res.getBody());
