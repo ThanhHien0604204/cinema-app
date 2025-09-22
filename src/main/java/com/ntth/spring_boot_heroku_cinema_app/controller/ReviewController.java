@@ -98,15 +98,6 @@ public class ReviewController {
     }
 
     // Tóm tắt rating (Trung bình đánh giá(avg) + Số lượng đánh giá (count))) theo movie (public)
-//    @GetMapping("/movie/{movieId}/summary")
-
-    /// /    @PreAuthorize("hasRole('ADMIN')")
-//    public MovieRatingSummary summary(@PathVariable String movieId) {
-//        var st = reviewRepo.aggregateStatsByMovie(movieId);
-//        double avg = st.map(s -> s.getAvgRating() == null ? 0d : s.getAvgRating()).orElse(0d);
-//        int cnt    = st.map(s -> s.getReviewCount() == null ? 0  : s.getReviewCount()).orElse(0);
-//        return new MovieRatingSummary(movieId, avg, cnt);
-//    }
     @GetMapping("/movie/{movieId}/summary")
     public MovieRatingSummary summary(@PathVariable String movieId) {
         var list = reviewRepo.findByMovieId(movieId);

@@ -98,13 +98,20 @@ public class ZaloPayController {
 
             int rc = safeInt(order.get("return_code"), 0);
             if (rc != 1) {
-                log.error("ZaloPay create order failed: rc=" + rc + ", resp=" + order);
-                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", "ZP_CREATE_FAILED", "details", order));
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                        .body(Map.of("error", "ZP_CREATE_FAILED", "details", order));
             }
 
+            // ✅ lấy orderUrl & token theo nhiều key (phòng ZP đổi tên trường)
+            String orderUrl = firstNonNullStr(
+                    order.get("order_url"), order.get("orderurl"),
+                    order.get("deeplink"),  order.get("orderurl_web")
+            );
+            String zpToken = firstNonNullStr(order.get("zp_trans_token"), order.get("zp_trans_id_token"));
+
             return ResponseEntity.ok(Map.of(
-                    "orderUrl", order.get("order_url"),
-                    "zpTransToken", order.get("zp_trans_token"),
+                    "orderUrl", orderUrl,
+                    "zpTransToken", zpToken,
                     "bookingId", bookingId
             ));
         } catch (Exception ex) {
@@ -113,6 +120,16 @@ public class ZaloPayController {
                     .body(Map.of("error", "INTERNAL_ERROR", "message", ex.getMessage()));
         }
     }
+    private String firstNonNullStr(Object... arr) {
+        for (Object o : arr) {
+            if (o != null) {
+                String s = String.valueOf(o);
+                if (!s.isBlank()) return s;
+            }
+        }
+        return null;
+    }
+
     private int safeInt(Object obj, int defaultValue) {
         if (obj instanceof Number) return ((Number) obj).intValue();
         try {
@@ -272,6 +289,7 @@ public class ZaloPayController {
 
         // CHECK STATUS VÀ CONFIRM TỰ ĐỘNG
         String statusCheckUrl = ensureNoTrailingSlash(publicBaseUrl) + "/api/payments/zalopay/status/" + bookingId;
+//        String confirmUrl = ensureNoTrailingSlash(publicBaseUrl) + "/api/bookings/" + bookingId + "/confirm";
         String confirmUrl = ensureNoTrailingSlash(publicBaseUrl) + "/api/bookings/" + bookingId + "/confirm";
 
         String html = """

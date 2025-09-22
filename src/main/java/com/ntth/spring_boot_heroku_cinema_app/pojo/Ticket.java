@@ -10,19 +10,20 @@ import java.util.Map;
 
 @Document("ticket")
 public class Ticket {
-        @Id
-        private String id;
-        @Indexed(unique = true)
-        private String bookingCode;    // dùng làm vnp_TxnRef
-        private String userId;
-        private String showtimeId;
-        private List<String> seats;
-        private long amount;
-        private String status;         // PENDING_PAYMENT|CONFIRMED|CANCELED|REFUNDED
-        private String holdId;
+    @Id
+    private String id;
+    @Indexed(unique = true)
+    private String bookingCode;    // dùng làm vnp_TxnRef
+    private String userId;
+    private String showtimeId;
+    private List<String> seats;
+    private long amount;
+    private String status;         // PENDING_PAYMENT|CONFIRMED|CANCELED|REFUNDED
+    @Indexed(unique = true)
+    private String holdId;
 
-        private PaymentInfo payment;   // simple inner class
-        private Instant createdAt;
+    private PaymentInfo payment;   // simple inner class
+    private Instant createdAt;
 
     public String getId() {
         return id;
@@ -80,13 +81,9 @@ public class Ticket {
         this.status = status;
     }
 
-    public String getHoldId() {
-        return holdId;
-    }
+    public String getHoldId() { return holdId; }
 
-    public void setHoldId(String holdId) {
-        this.holdId = holdId;
-    }
+    public void setHoldId(String holdId) { this.holdId = holdId; }
 
     public PaymentInfo getPayment() {
         return payment;
@@ -105,12 +102,12 @@ public class Ticket {
     }
 
     public static class PaymentInfo {
-            private String gateway;      // VNPAY|CASH|...
-            private String intentId;
-            private Instant paidAt;
-            private String txId;
-            private Map<String, Object> raw;
-            private String zpTransId;
+        private String gateway;      // VNPAY|CASH|...
+        private String intentId;
+        private Instant paidAt;
+        private String txId;
+        private Map<String, Object> raw;
+        private String zpTransId;
 
         public String getGateway() {
             return gateway;
@@ -152,8 +149,12 @@ public class Ticket {
             this.raw = raw;
         }
 
-        public String getZpTransId() { return zpTransId; }
+        public String getZpTransId() {
+            return zpTransId;
+        }
 
-        public void setZpTransId(String zpTransId) { this.zpTransId = zpTransId; }
+        public void setZpTransId(String zpTransId) {
+            this.zpTransId = zpTransId;
+        }
     }
 }

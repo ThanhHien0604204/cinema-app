@@ -2,6 +2,7 @@ package com.ntth.spring_boot_heroku_cinema_app.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ntth.spring_boot_heroku_cinema_app.filter.JwtUser;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.SeatLedger;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.SeatLock;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Ticket;
@@ -46,7 +47,6 @@ public class TicketService {
         this.zalo = zalo;
         this.mongo = mongo;
     }
-
     /**
      * CONFIRM booking từ PENDING_PAYMENT khi user quay về app
      * - Set ticket status = CONFIRMED
@@ -275,6 +275,14 @@ public class TicketService {
      */
     @Transactional
     public Ticket createBookingZaloPay(String holdId, String userId) {
+        var existed = findExistingByHold(holdId);
+        if (existed.isPresent()) {
+            var b = existed.get();
+            // Nếu booking đã tạo rồi, trả về luôn để idempotent (tránh race CASH/ZP)
+            if (!"CANCELED".equalsIgnoreCase(b.getStatus()) && !"FAILED".equalsIgnoreCase(b.getStatus())) {
+                return b;
+            }
+        }
         return createBookingFromHold(holdId, userId, "ZALOPAY");
     }
 
@@ -466,5 +474,140 @@ public class TicketService {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    // --------- Helper: tìm booking theo holdId (idempotent) ----------
+    private Optional<Ticket> findExistingByHold(String holdId) {
+        return ticketRepo.findByHoldId(holdId);
+        // hoặc dùng findFirstByHoldIdOrderByCreatedAtDesc(holdId) nếu bạn đã thêm ở repo
+    }
+
+    // --------- Helper: load & validate SeatLock ----------
+    private SeatLock loadValidHoldOrThrow(String holdId, String userId) {
+        SeatLock lock = lockRepo.findById(holdId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "HOLD_NOT_FOUND"));
+        if (!Objects.equals(lock.getUserId(), userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "HOLD_NOT_OWNED");
+        }
+        if (lock.getExpiresAt() != null && Instant.now().isAfter(lock.getExpiresAt())) {
+            throw new ResponseStatusException(HttpStatus.GONE, "HOLD_EXPIRED");
+        }
+        return lock;
+    }
+
+    // ================== Tạo booking CASH và xác nhận ngay ==================
+    @Transactional
+    public Ticket createBookingCash(String holdId, JwtUser user) {
+        String userId = user.getUserId();
+
+        // 1) Idempotent: nếu đã có booking cho holdId → trả về luôn
+        Optional<Ticket> existed = findExistingByHold(holdId);
+        if (existed.isPresent()) {
+            return existed.get();
+        }
+
+        // 2) Validate hold thuộc user và còn hạn
+        SeatLock lock = loadValidHoldOrThrow(holdId, userId);
+
+        // 3) Tạo Ticket PENDING_PAYMENT (gateway = CASH)
+        Ticket b = new Ticket();
+        b.setUserId(userId);
+        b.setShowtimeId(lock.getShowtimeId());
+        b.setSeats(new ArrayList<>(lock.getSeats()));
+        // SeatLock của bạn có field Amount viết hoa, nhưng getter vẫn thường là getAmount()
+        Long lockAmount = lock.getAmount(); // nếu IDE báo lỗi, đổi thành getAmount() đúng tên getter của bạn
+        b.setAmount(lockAmount == null ? 0L : lockAmount);
+        b.setStatus("PENDING_PAYMENT");
+        b.setHoldId(holdId);
+        b.setCreatedAt(Instant.now());
+
+        Ticket.PaymentInfo p = b.getPayment();
+        if (p == null) p = new Ticket.PaymentInfo();
+        p.setGateway("CASH");
+        if (p.getRaw() == null) p.setRaw(new HashMap<>());
+        b.setPayment(p);
+
+        try {
+            b = ticketRepo.save(b);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            // Nếu 2 request đua nhau cùng holdId, quay lại lấy bản đã được insert
+            return ticketRepo.findByHoldId(holdId).orElseThrow(() -> e);
+        }
+
+        // 4) Xác nhận ngay (giống IPN thành công)
+        return finalizeConfirm(b.getId(), Instant.now(), /*transId*/ null, /*raw*/ Map.of("source", "CASH"));
+    }
+
+    // ================== (Tuỳ chọn) Tạo booking ZaloPay (idempotent theo hold) ==================
+    @Transactional
+    public Ticket createBookingZaloPay(String holdId, JwtUser user) {
+        String userId = user.getUserId();
+
+        Optional<Ticket> existed = findExistingByHold(holdId);
+        if (existed.isPresent()) {
+            return existed.get();
+        }
+
+        SeatLock lock = loadValidHoldOrThrow(holdId, userId);
+
+        Ticket b = new Ticket();
+        b.setUserId(userId);
+        b.setShowtimeId(lock.getShowtimeId());
+        b.setSeats(new ArrayList<>(lock.getSeats()));
+        Long lockAmount = lock.getAmount();
+        b.setAmount(lockAmount == null ? 0L : lockAmount);
+        b.setStatus("PENDING_PAYMENT");
+        b.setHoldId(holdId);
+        b.setCreatedAt(Instant.now());
+
+        Ticket.PaymentInfo p = b.getPayment();
+        if (p == null) p = new Ticket.PaymentInfo();
+        p.setGateway("ZALOPAY");
+        if (p.getRaw() == null) p.setRaw(new HashMap<>());
+        b.setPayment(p);
+
+        try {
+            b = ticketRepo.save(b);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            return ticketRepo.findByHoldId(holdId).orElseThrow(() -> e);
+        }
+        return b;
+    }
+
+    // ================== Finalize: CONFIRMED + ledger + cleanup hold ==================
+    private Ticket finalizeConfirm(String bookingId, Instant paidAt, String transId, Map<String, ?> extraRaw) {
+        Ticket b = ticketRepo.findById(bookingId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND"));
+
+        if ("CONFIRMED".equalsIgnoreCase(b.getStatus())) return b; // idempotent
+
+        // --- cập nhật trạng thái + payment (đúng kiểu POJO PaymentInfo của bạn) ---
+        b.setStatus("CONFIRMED");
+        Ticket.PaymentInfo p = (b.getPayment() != null) ? b.getPayment() : new Ticket.PaymentInfo();
+        if (p.getRaw() == null) p.setRaw(new HashMap<>());
+        p.setPaidAt(paidAt == null ? Instant.now() : paidAt);
+        if (transId != null) p.setZpTransId(transId);
+        if (extraRaw != null) p.getRaw().putAll(extraRaw);
+        b.setPayment(p);
+
+        ticketRepo.save(b);
+
+        // --- ✅ confirm seats trong ledger: truyền đủ 4 tham số (showtimeId, seats, bookingId, holdId) ---
+        try {
+            String holdId = b.getHoldId(); // Ticket của bạn luôn có holdId (đã @Indexed unique)
+            long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), holdId);
+            // optional: log để debug idempotency
+            // log.debug("ledger confirmMany updated = {}", updated);
+        } catch (Exception e) {
+            // Không fail booking nếu ledger confirmMany idempotent (đã confirmed trước đó) → chỉ cảnh báo
+            // log.warn("ledger confirm failed: {}", e.toString());
+        }
+
+        // --- dọn SeatLock sau khi confirm ---
+        try {
+            if (b.getHoldId() != null) lockRepo.deleteById(b.getHoldId());
+        } catch (Exception ignore) {}
+
+        return b;
     }
 }

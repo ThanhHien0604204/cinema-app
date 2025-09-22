@@ -72,44 +72,72 @@ public class ZaloPayService {
         // APP TRANS ID: Format yyyyMMdd_BOOKING_CODE
         String appTransId = LocalDate.now().format(YYMMDD) + "_" + b.getBookingCode();
 
+        // ✅ Dùng MỘT timestamp cho cả app_time và MAC
+        long ts = System.currentTimeMillis();
+
+        String item = "ticket_" + b.getBookingCode(); // giữ nguyên format bạn đang dùng
+        String embed = createEmbedData(b);
+        String desc  = "Thanh toán vé xem phim - " + b.getBookingCode();
+
         // REQUEST BODY
         Map<String, Object> req = new LinkedHashMap<>();
         req.put("app_id", appId);
         req.put("app_trans_id", appTransId);
         req.put("app_user", appUser);  // User ID hoặc email
-        req.put("app_time", System.currentTimeMillis());  // Timestamp
-        req.put("amount", b.getAmount());  // SỐ TIỀN (KHÔNG CÓ DẤU PHẨY)
-        req.put("item", "ticket_" + b.getBookingCode());  // Mô tả
-        req.put("embed_data", createEmbedData(b));  // THÊM NÀY - QUAN TRỌNG
-        req.put("description", "Thanh toán vé xem phim - " + b.getBookingCode());
+        req.put("app_time", ts);               // ✅ dùng ts
+        req.put("amount", b.getAmount());
+        req.put("item", item);
+        req.put("embed_data", embed);
+        req.put("description", desc);
 
-        // MAC SECURITY
+        // ✅ MAC dùng cùng ts & đúng thứ tự bạn đang có
         String macData = String.format("%d|%s|%s|%d|%d|%s|%s|%s",
-                appId, appTransId, appUser, System.currentTimeMillis(),
-                b.getAmount(), "ticket_" + b.getBookingCode(),
-                createEmbedData(b), "Thanh toán vé xem phim - " + b.getBookingCode());
-
+                appId, appTransId, appUser, ts, b.getAmount(), item, embed, desc);
         req.put("mac", hmacSHA256Hex(key1, macData));
-
-        log.info("ZaloPay create order request: {}", req);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        log.info("Sending ZP request: {}", toJson(req));
 
-        log.info("Sending ZaloPay request to " + endpoint + ", body: " + toJson(req)); // Log trước khi gửi
-        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(req, headers);
-        ResponseEntity<Map> res = restTemplate.postForEntity(endpoint, entity, Map.class);
-        log.info("ZaloPay API response: status=" + res.getStatusCode() + ", body=" + res.getBody()); // Log sau khi nhận
+        ResponseEntity<Map> res = restTemplate.postForEntity(endpoint, new HttpEntity<>(req, headers), Map.class);
+        log.info("ZP response: status={}, body={}", res.getStatusCode(), res.getBody());
 
         if (!res.getStatusCode().is2xxSuccessful() || res.getBody() == null) {
-            log.error("ZaloPay create order failed: {}", res.getBody());
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ZP_CREATE_ORDER_FAILED");
         }
 
-        Map<String, Object> response = castToMap(res.getBody());
-        log.info("ZaloPay create order success: {}", response);
 
-        return response;
+        // Dùng đúng 1 biến duy nhất: 'out'
+        Map<String, Object> out = castToMap(res.getBody());
+
+        // Chuẩn hoá order_url & token: thử nhiều key
+        String orderUrl = firstNonNullString(
+                out.get("order_url"),
+                out.get("orderurl"),
+                out.get("deeplink"),
+                out.get("orderurl_web")
+        );
+        if (orderUrl == null || orderUrl.isBlank()) {
+            log.error("ZP create response missing order_url variants: {}", out);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ZP_NO_ORDER_URL");
+        }
+        out.put("order_url", orderUrl); // đảm bảo luôn có key này
+
+        String token = firstNonNullString(out.get("zp_trans_token"), out.get("zp_trans_id_token"));
+        if (token != null && !token.isBlank()) out.put("zp_trans_token", token);
+
+        return out;
+    }
+
+    // Helper nhỏ (thêm vào ZaloPayService)
+    private static String firstNonNullString(Object... opts) {
+        for (Object o : opts) {
+            if (o != null) {
+                String s = String.valueOf(o);
+                if (!s.isBlank()) return s;
+            }
+        }
+        return null;
     }
 
     /** Xác minh IPN: data & mac (key2). Return {return_code, return_message, parsed?} */

@@ -56,13 +56,17 @@ public class TicketController {
     public ResponseEntity<?> createBooking(@RequestBody Map<String, String> body,
                                            @AuthenticationPrincipal JwtUser principal) {
         String holdId = body.get("holdId");
+        if (holdId == null || holdId.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "MISSING_HOLD_ID"));
+        }
         String method = body.getOrDefault("paymentMethod", "CASH");
-        Ticket b = ticketService.createBookingFromHold(holdId, principal.getUserId(), method);
+        Ticket b = ticketService.createBookingCash(holdId, principal);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "bookingId", b.getId(),
                 "bookingCode", b.getBookingCode(),
                 "status", b.getStatus(),
-                "amount", b.getAmount()
+                "amount", b.getAmount(),
+                "gateway", b.getPayment() != null ? b.getPayment().getGateway() : null
         ));
     }
 

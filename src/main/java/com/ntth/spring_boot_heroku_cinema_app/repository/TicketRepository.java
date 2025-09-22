@@ -30,4 +30,8 @@ public interface TicketRepository extends MongoRepository<Ticket, String> {
 
     List<Ticket> findByUserIdAndShowtimeIdInOrderByCreatedAtDesc(String userId, Collection<String> showtimeIds);
 
+    Optional<Ticket> findFirstByHoldIdOrderByCreatedAtDesc(String holdId);
+
+    Optional<Ticket> findByHoldId(String holdId);
+
 }
