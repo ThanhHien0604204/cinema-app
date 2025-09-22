@@ -1,8 +1,6 @@
 package com.ntth.spring_boot_heroku_cinema_app.pojo;
 
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -19,8 +17,8 @@ public class Review {
 
     @Indexed private String userId;     // query theo user
 
-    @Min(1) @Max(5)
-    private int rating;
+    @DecimalMin("1.0") @DecimalMax("5.0")
+    private double rating;
 
     @Size(max = 2000)
     private String content;
@@ -30,7 +28,7 @@ public class Review {
     public Review() {
     }
 
-    public Review(String movieId, String userId, int rating, String content) {
+    public Review(String movieId, String userId, double rating, String content) {
         this.movieId = movieId;
         this.userId = userId;
         this.rating = rating;
@@ -62,11 +60,11 @@ public class Review {
         this.userId = userId;
     }
 
-    public int getRating() {
+    public double getRating() {
         return rating;
     }
 
-    public void setRating(int rating) {
+    public void setRating(double rating) {
         this.rating = rating;
     }
 

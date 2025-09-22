@@ -111,7 +111,7 @@ public class ReviewController {
     public MovieRatingSummary summary(@PathVariable String movieId) {
         var list = reviewRepo.findByMovieId(movieId);
         if (list.isEmpty()) return new MovieRatingSummary(movieId, 0d, 0);
-        double avg = list.stream().mapToInt(Review::getRating).average().orElse(0d);
+        double avg = list.stream().mapToDouble(Review::getRating).average().orElse(0d);
         return new MovieRatingSummary(movieId, avg, list.size());
     }
 

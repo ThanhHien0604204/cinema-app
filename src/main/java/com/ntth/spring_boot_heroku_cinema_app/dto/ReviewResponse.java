@@ -8,7 +8,7 @@ public record ReviewResponse(
         String id,
         String movieId,
         String userId,
-        int rating,
+        double rating,
         String content,
         Instant reviewTime
 ) {

@@ -17,7 +17,7 @@ public class ReviewService {
     private ReviewRepository repo;
 
     // Tạo mới hoặc cập nhật review của chính user cho movie
-    public ReviewResponse upsert(String movieId, String userId, int rating, String content) {
+    public ReviewResponse upsert(String movieId, String userId, double rating, String content) {
         Review r = repo.findByMovieIdAndUserId(movieId, userId).orElse(null);
         if (r == null) {
             r = new Review(movieId, userId, rating, content);
