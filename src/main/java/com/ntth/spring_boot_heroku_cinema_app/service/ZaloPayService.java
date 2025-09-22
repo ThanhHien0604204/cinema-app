@@ -52,7 +52,7 @@ public class ZaloPayService {
     @Value("${app.publicBaseUrl}")
     private String publicBaseUrl;
 
-    @Value("${app.deeplink:}")  // ví dụ: myapp://zp-callback
+    @Value("${app.deeplink}")  // ví dụ: myapp://zp-callback
     private String deeplinkBase;
     public ZaloPayService() {
         // Khởi tạo RestTemplate với timeout tùy chỉnh
@@ -75,7 +75,7 @@ public class ZaloPayService {
         // ✅ Dùng MỘT timestamp cho cả app_time và MAC
         long ts = System.currentTimeMillis();
 
-        String item = "ticket_" + b.getBookingCode(); // giữ nguyên format bạn đang dùng
+        String itemJson = "[]"; // giữ nguyên format bạn đang dùng
         String embed = createEmbedData(b);
         String desc  = "Thanh toán vé xem phim - " + b.getBookingCode();
 
@@ -86,13 +86,14 @@ public class ZaloPayService {
         req.put("app_user", appUser);  // User ID hoặc email
         req.put("app_time", ts);               // ✅ dùng ts
         req.put("amount", b.getAmount());
-        req.put("item", item);
+        req.put("item",  itemJson);
         req.put("embed_data", embed);
+        req.put("callback_url", ipnCallbackUrl);                 // ✅ thêm IPN callback
         req.put("description", desc);
 
         // ✅ MAC dùng cùng ts & đúng thứ tự bạn đang có
-        String macData = String.format("%d|%s|%s|%d|%d|%s|%s|%s",
-                appId, appTransId, appUser, ts, b.getAmount(), item, embed, desc);
+        // ✅ MAC đúng 7 trường (không có description / callback_url)
+        String macData = appId + "|" + appTransId + "|" + appUser + "|" + b.getAmount() + "|" + ts + "|" + embed + "|" + itemJson;
         req.put("mac", hmacSHA256Hex(key1, macData));
 
         HttpHeaders headers = new HttpHeaders();
@@ -106,9 +107,12 @@ public class ZaloPayService {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ZP_CREATE_ORDER_FAILED");
         }
 
-
         // Dùng đúng 1 biến duy nhất: 'out'
         Map<String, Object> out = castToMap(res.getBody());
+
+        // ❗ Nếu ZP trả lỗi (rc != 1) → trả nguyên body cho Controller xử lý, KHÔNG cố đọc order_url
+        int rc = safeInt(out.get("return_code"), 0);
+        if (rc != 1) return out;
 
         // Chuẩn hoá order_url & token: thử nhiều key
         String orderUrl = firstNonNullString(
@@ -128,6 +132,8 @@ public class ZaloPayService {
 
         return out;
     }
+
+    private int safeInt(Object obj, int def) { try { return (obj instanceof Number) ? ((Number)obj).intValue() : Integer.parseInt(String.valueOf(obj)); } catch(Exception e){ return def; } }
 
     // Helper nhỏ (thêm vào ZaloPayService)
     private static String firstNonNullString(Object... opts) {
