@@ -61,13 +61,15 @@ public class TicketController {
         }
         String method = body.getOrDefault("paymentMethod", "CASH");
         Ticket b = ticketService.createBookingCash(holdId, principal);
-        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                "bookingId", b.getId(),
-                "bookingCode", b.getBookingCode(),
-                "status", b.getStatus(),
-                "amount", b.getAmount(),
-                "gateway", b.getPayment() != null ? b.getPayment().getGateway() : null
-        ));
+
+        Map<String,Object> resp = new LinkedHashMap<>();
+        resp.put("bookingId",   b.getId());
+        resp.put("bookingCode", b.getBookingCode());      // có thể null nếu chưa set → map này vẫn OK
+        resp.put("status",      b.getStatus());
+        resp.put("amount",      b.getAmount());
+        resp.put("gateway",     b.getPayment()!=null ? b.getPayment().getGateway() : null);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(resp);
     }
 
     /**

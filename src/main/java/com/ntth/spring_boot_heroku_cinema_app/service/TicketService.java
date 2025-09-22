@@ -512,6 +512,7 @@ public class TicketService {
         // 3) Tạo Ticket PENDING_PAYMENT (gateway = CASH)
         Ticket b = new Ticket();
         b.setUserId(userId);
+        b.setBookingCode(genCode());
         b.setShowtimeId(lock.getShowtimeId());
         b.setSeats(new ArrayList<>(lock.getSeats()));
         // SeatLock của bạn có field Amount viết hoa, nhưng getter vẫn thường là getAmount()
@@ -595,12 +596,18 @@ public class TicketService {
         // --- ✅ confirm seats trong ledger: truyền đủ 4 tham số (showtimeId, seats, bookingId, holdId) ---
         try {
             String holdId = b.getHoldId(); // Ticket của bạn luôn có holdId (đã @Indexed unique)
-            long updated = ledgerRepo.confirmMany(b.getShowtimeId(), b.getSeats(), b.getId(), holdId);
-            // optional: log để debug idempotency
-            // log.debug("ledger confirmMany updated = {}", updated);
+            List<String> seats = b.getSeats();
+            String showtimeId = b.getShowtimeId();
+            if (holdId == null || seats == null || seats.isEmpty() || showtimeId == null) {
+                // Log & bỏ qua để không NPE
+                log.warn("Skip confirmMany due to missing fields. holdId={}, seats={}, showtimeId={}",
+                        holdId, seats, showtimeId);
+            } else {
+                long updated = ledgerRepo.confirmMany(showtimeId, seats, b.getId(), holdId);
+                log.debug("ledger confirmMany updated={}", updated);
+            }
         } catch (Exception e) {
-            // Không fail booking nếu ledger confirmMany idempotent (đã confirmed trước đó) → chỉ cảnh báo
-            // log.warn("ledger confirm failed: {}", e.toString());
+            log.warn("ledger confirm failed: {}", e.toString());
         }
 
         // --- dọn SeatLock sau khi confirm ---
