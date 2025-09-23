@@ -26,10 +26,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
@@ -59,10 +56,19 @@ public class TicketController {
         if (holdId == null || holdId.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "MISSING_HOLD_ID"));
         }
-        String method = body.getOrDefault("paymentMethod", "CASH");
-        Ticket b = ticketService.createBookingCash(holdId, principal);
+        String method = String.valueOf(body.getOrDefault("paymentMethod", "CASH"))
+                .toUpperCase(Locale.ROOT);
+        Ticket b;
+        if ("ZALOPAY".equals(method)) {
+            // ✅ ĐÚNG luồng ZaloPay: PENDING_PAYMENT
+            b = ticketService.createBookingZaloPay(holdId, principal);
+        } else {
+            // ✅ Luồng tiền mặt: CONFIRMED ngay
+            b = ticketService.createBookingCash(holdId, principal);
+        }
 
         Map<String,Object> resp = new LinkedHashMap<>();
+        resp.put("bookingId",   b.getId());
         resp.put("bookingId",   b.getId());
         resp.put("bookingCode", b.getBookingCode());      // có thể null nếu chưa set → map này vẫn OK
         resp.put("status",      b.getStatus());
