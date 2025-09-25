@@ -25,6 +25,7 @@ public class CinemaController {
         this.cinemaRepository = cinemaRepository;
         this.roomRepository = roomRepository;
     }
+    // GET /api/cinemas
     @GetMapping
     public ResponseEntity<List<Cinema>> getAllCinemas() {
         List<Cinema> cinemas = cinemaRepository.findAll();
@@ -47,9 +48,21 @@ public class CinemaController {
         }
         return rooms;
     }
+    // POST /api/cinemas
     @PostMapping
     public ResponseEntity<Cinema> addCinema(@RequestBody Cinema cinema) {
         Cinema savedCinema = cinemaRepository.save(cinema);
         return ResponseEntity.ok(savedCinema);
+    }
+    // DELETE /api/cinemas/{id}
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteCinema(@PathVariable String id) {
+        // Kiểm tra xem cinema có tồn tại không
+        if (!cinemaRepository.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cinema not found");
+        }
+        // Xóa cinema
+        cinemaRepository.deleteById(id);
     }
 }

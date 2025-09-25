@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -237,5 +238,82 @@ public class UserController {
                     .getId();
         }
         throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unsupported principal");
+    }
+
+    //ADMIN
+
+    // GET /api/users (with optional search)
+    @GetMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<PublicUserResponse> getAllUsers(@RequestParam(required = false) String search) {
+        List<User> users;
+        if (search != null && !search.isEmpty()) {
+            users = userRepo.findByUserNameContainingIgnoreCase(search);
+        } else {
+            users = userRepo.findAll();
+        }
+        // Return DTO to avoid exposing password
+        return users.stream().map(PublicUserResponse::of).collect(Collectors.toList());
+    }
+
+    // GET /api/users/{id}
+    @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public PublicUserResponse getUserByIdADMIN(@PathVariable String id) {
+        User user = userRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        return PublicUserResponse.of(user);
+    }
+
+    // POST /api/users
+    @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public PublicUserResponse createUser(@RequestBody User user) {
+        if (userRepo.existsByEmail(user.getEmail())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already exists");
+        }
+        // Hash password
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        User savedUser = userRepo.save(user);
+        return PublicUserResponse.of(savedUser);
+    }
+
+    // PUT /api/users/{id}
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public PublicUserResponse updateUser(@PathVariable String id, @RequestBody User updatedUser) {
+        User existingUser = userRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        // Update fields
+        if (updatedUser.getUserName() != null) {
+            existingUser.setUserName(updatedUser.getUserName());
+        }
+        if (updatedUser.getEmail() != null) {
+            if (!updatedUser.getEmail().equals(existingUser.getEmail()) && userRepo.existsByEmail(updatedUser.getEmail())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already exists");
+            }
+            existingUser.setEmail(updatedUser.getEmail());
+        }
+        if (updatedUser.getPassword() != null && !updatedUser.getPassword().isEmpty()) {
+            existingUser.setPassword(passwordEncoder.encode(updatedUser.getPassword()));
+        }
+        if (updatedUser.getRole() != null) {
+            existingUser.setRole(updatedUser.getRole());
+        }
+
+        User savedUser = userRepo.save(existingUser);
+        return PublicUserResponse.of(savedUser);
+    }
+
+    // DELETE /api/users/{id}
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteUser(@PathVariable String id) {
+        if (!userRepo.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+        }
+        userRepo.deleteById(id);
     }
 }
