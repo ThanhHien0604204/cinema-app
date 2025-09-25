@@ -306,7 +306,7 @@ public class UserController {
         return PublicUserResponse.of(savedUser);
     }
 
-    // DELETE /api/users/{id}
+    // DELETE /user/admin/{id}
     @DeleteMapping("/user/admin/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
