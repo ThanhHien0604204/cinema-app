@@ -242,8 +242,8 @@ public class UserController {
 
     //ADMIN
 
-    // GET /api/users (with optional search)
-    @GetMapping
+    // GET /api (with optional search)
+    @GetMapping("/user/admin")
     @PreAuthorize("hasRole('ADMIN')")
     public List<PublicUserResponse> getAllUsers(@RequestParam(required = false) String search) {
         List<User> users;
@@ -256,8 +256,8 @@ public class UserController {
         return users.stream().map(PublicUserResponse::of).collect(Collectors.toList());
     }
 
-    // GET /api/users/{id}
-    @GetMapping("/{id}")
+    // GET /api/{id}
+    @GetMapping("/user/admin/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public PublicUserResponse getUserByIdADMIN(@PathVariable String id) {
         User user = userRepo.findById(id)
@@ -265,8 +265,8 @@ public class UserController {
         return PublicUserResponse.of(user);
     }
 
-    // POST /api/users
-    @PostMapping
+    // POST /api
+    @PostMapping("/user/admin")
     @PreAuthorize("hasRole('ADMIN')")
     public PublicUserResponse createUser(@RequestBody User user) {
         if (userRepo.existsByEmail(user.getEmail())) {
@@ -278,8 +278,8 @@ public class UserController {
         return PublicUserResponse.of(savedUser);
     }
 
-    // PUT /api/users/{id}
-    @PutMapping("/{id}")
+    // PUT /api/{id}
+    @PutMapping("/user/admin/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public PublicUserResponse updateUser(@PathVariable String id, @RequestBody User updatedUser) {
         User existingUser = userRepo.findById(id)
@@ -307,7 +307,7 @@ public class UserController {
     }
 
     // DELETE /api/users/{id}
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/user/admin/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteUser(@PathVariable String id) {
