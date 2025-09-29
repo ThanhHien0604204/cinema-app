@@ -9,6 +9,8 @@ import com.ntth.spring_boot_heroku_cinema_app.repository.UserRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
 import com.ntth.spring_boot_heroku_cinema_app.service.UserService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -39,6 +41,8 @@ public class UserController {
     private JwtProvider jwtProvider;
     @Autowired
     private BCryptPasswordEncoder passwordEncoder;
+
+    private static final Logger log = LoggerFactory.getLogger(UserController.class);
 
     public UserController(UserRepository userRepo, BCryptPasswordEncoder passwordEncoder) {
         this.userRepo = userRepo;
@@ -246,13 +250,13 @@ public class UserController {
     @GetMapping("/user/admin")
     @PreAuthorize("hasRole('ADMIN')")
     public List<PublicUserResponse> getAllUsers(@RequestParam(required = false) String search) {
+        System.out.println("Received GET /user/admin with search: " + search);
         List<User> users;
         if (search != null && !search.isEmpty()) {
             users = userRepo.findByUserNameContainingIgnoreCase(search);
         } else {
             users = userRepo.findAll();
         }
-        // Return DTO to avoid exposing password
         return users.stream().map(PublicUserResponse::of).collect(Collectors.toList());
     }
 
@@ -281,29 +285,67 @@ public class UserController {
     // PUT /api/{id}
     @PutMapping("/user/admin/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public PublicUserResponse updateUser(@PathVariable String id, @RequestBody User updatedUser) {
+    public PublicUserResponse updateUser(@PathVariable String id, @Valid @RequestBody User updatedUser) {
+        log.info("Received request to update user with ID: {}", id);
+
+        // Validate request body
+        if (updatedUser == null) {
+            log.error("Request body is null for user ID: {}", id);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body cannot be null");
+        }
+
+        // Fetch existing user
         User existingUser = userRepo.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+                .orElseThrow(() -> {
+                    log.warn("User not found with ID: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+                });
 
-        // Update fields
-        if (updatedUser.getUserName() != null) {
-            existingUser.setUserName(updatedUser.getUserName());
-        }
-        if (updatedUser.getEmail() != null) {
-            if (!updatedUser.getEmail().equals(existingUser.getEmail()) && userRepo.existsByEmail(updatedUser.getEmail())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already exists");
+        // Update fields with validation
+        try {
+            if (updatedUser.getUserName() != null && !updatedUser.getUserName().trim().isEmpty()) {
+                existingUser.setUserName(updatedUser.getUserName().trim());
             }
-            existingUser.setEmail(updatedUser.getEmail());
-        }
-        if (updatedUser.getPassword() != null && !updatedUser.getPassword().isEmpty()) {
-            existingUser.setPassword(passwordEncoder.encode(updatedUser.getPassword()));
-        }
-        if (updatedUser.getRole() != null) {
-            existingUser.setRole(updatedUser.getRole());
-        }
 
-        User savedUser = userRepo.save(existingUser);
-        return PublicUserResponse.of(savedUser);
+            if (updatedUser.getEmail() != null && !updatedUser.getEmail().trim().isEmpty()) {
+                String newEmail = updatedUser.getEmail().trim().toLowerCase();
+                if (!newEmail.equals(existingUser.getEmail()) && userRepo.existsByEmail(newEmail)) {
+                    log.warn("Email already exists: {}", newEmail);
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already exists");
+                }
+                if (!newEmail.matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
+                    log.warn("Invalid email format: {}", newEmail);
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid email format");
+                }
+                existingUser.setEmail(newEmail);
+            }
+
+            if (updatedUser.getPassword() != null && !updatedUser.getPassword().isEmpty()) {
+                if (updatedUser.getPassword().length() < 6) {
+                    log.warn("Password too short for user ID: {}", id);
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 6 characters");
+                }
+                existingUser.setPassword(passwordEncoder.encode(updatedUser.getPassword()));
+            }
+
+            if (updatedUser.getRole() != null && !updatedUser.getRole().isEmpty()) {
+                String newRole = updatedUser.getRole().toUpperCase();
+                if (!"ADMIN".equals(newRole) && !"USER".equals(newRole)) {
+                    log.warn("Invalid role '{}' for user ID: {}", newRole, id);
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Role must be ADMIN or USER");
+                }
+                existingUser.setRole(newRole);
+            }
+
+            // Save to database
+            User savedUser = userRepo.save(existingUser);
+            log.info("User updated successfully with ID: {}", id);
+            return PublicUserResponse.of(savedUser);
+
+        } catch (Exception e) {
+            log.error("Error updating user with ID {}: {}", id, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error: " + e.getMessage());
+        }
     }
 
     // DELETE /user/admin/{id}

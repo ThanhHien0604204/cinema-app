@@ -7,6 +7,7 @@ import com.ntth.spring_boot_heroku_cinema_app.repository.RoomRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -52,6 +53,28 @@ public class CinemaController {
     @PostMapping
     public ResponseEntity<Cinema> addCinema(@RequestBody Cinema cinema) {
         Cinema savedCinema = cinemaRepository.save(cinema);
+        return ResponseEntity.ok(savedCinema);
+    }
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Cinema> updateCinema(@PathVariable String id, @RequestBody Cinema updatedCinema) {
+        // Kiểm tra xem cinema có tồn tại không
+        Cinema existingCinema = cinemaRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cinema not found"));
+
+        // Cập nhật các trường từ updatedCinema
+        if (updatedCinema.getName() != null) {
+            existingCinema.setName(updatedCinema.getName());
+        }
+        if (updatedCinema.getAddress() != null) {
+            existingCinema.setAddress(updatedCinema.getAddress());
+        }
+        if (updatedCinema.getNumberOfRooms() != 0) {
+            existingCinema.setNumberOfRooms(updatedCinema.getNumberOfRooms());
+        }
+
+        // Lưu thay đổi
+        Cinema savedCinema = cinemaRepository.save(existingCinema);
         return ResponseEntity.ok(savedCinema);
     }
     // DELETE /api/cinemas/{id}

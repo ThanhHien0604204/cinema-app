@@ -6,7 +6,8 @@ import com.ntth.spring_boot_heroku_cinema_app.pojo.User;
 public class PublicUserResponse {
     public String id;
     public String userName;
-    public String email;      // nếu không muốn lộ email, có thể bỏ field này
+    public String email;
+    public String role;
 //    public String avatarUrl;  // nếu chưa có, tạm để null/placeholder
 
     public static PublicUserResponse of(User u) {
@@ -14,6 +15,7 @@ public class PublicUserResponse {
         dto.id = u.getId();
         dto.userName = u.getUserName();
         dto.email = u.getEmail();
+        dto.role = u.getRole();
 //        dto.avatarUrl = null; // hoặc lấy từ u.getAvatarUrl() nếu bạn có thuộc tính này
         return dto;
     }

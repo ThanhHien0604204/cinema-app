@@ -108,7 +108,7 @@ public class ShowtimeController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi server: " + e.getMessage());
         }
     }
-
+    //showtime details
     @GetMapping("/{id}")
     public Showtime get(@PathVariable String id) {
         return showtimeRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
