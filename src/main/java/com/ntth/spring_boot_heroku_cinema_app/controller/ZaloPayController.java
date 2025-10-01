@@ -291,28 +291,32 @@ public class ZaloPayController {
                 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
                 <title>Xác nhận thanh toán</title>
                 <script>
-                async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
-                async function processPayment(){
-                  const statusUrl = '%s';
-                  const target = '%s';
-                  // Thử 5 lần, mỗi lần cách 1s để đợi IPN
-                  for (let i=0;i<5;i++){
-                    try{
-                      const r = await fetch(statusUrl,{method:'GET'}); // ✅ không cần Authorization
-                      if(r.ok){
-                        const s = await r.json();
-                        if(s.status==='CONFIRMED'){ window.location.replace(target+'&status=SUCCESS'); return; }
-                        if(s.status==='FAILED'||s.status==='CANCELED'){ window.location.replace(target+'&status=FAILED'); return; }
-                      }
-                    }catch(e){/* bỏ qua, thử lại */}
-                    await sleep(1000);
-                  }
-                  // Sau 5s mà vẫn PENDING → báo PENDING về app để app tự polling
-                  window.location.replace(target+'&status=PENDING');
-                }
-                setTimeout(processPayment, 300);
-                setTimeout(()=>{ window.location.replace('%s&status=PENDING'); }, 7000); // fallback 7s
-                </script>
+                         async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+                         async function processPayment(){
+                           const statusUrl = '%s';
+                           const confirmUrl = '%s';
+                           const target = '%s';
+                
+                           for (let i=0;i<5;i++){
+                             try{
+                               const rs = await fetch(statusUrl);       // check
+                               if (rs.ok) {
+                                 const s = await rs.json();
+                                 if (s.status === 'CONFIRMED') { location.replace(target+'&status=SUCCESS'); return; }
+                                 if (s.status === 'FAILED' || s.status === 'CANCELED') { location.replace(target+'&status=FAILED'); return; }
+                                 if (s.status === 'PENDING_PAYMENT') {
+                                   // ✅ FORCE CONFIRM (cách C)
+                                   await fetch(confirmUrl, { method:'POST' });
+                                 }
+                               }
+                             }catch(e){}
+                             await sleep(1000);
+                           }
+                           // PENDING -> để app polling
+                           location.replace(target+'&status=PENDING');
+                         }
+                         setTimeout(processPayment, 300);
+                         </script>
                 <style>body{font-family:Arial;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#111;color:#fff}</style>
                 </head><body><div><div style="text-align:center">
                 <div style="width:38px;height:38px;border:3px solid #777;border-top-color:#fff;border-radius:50%%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>
