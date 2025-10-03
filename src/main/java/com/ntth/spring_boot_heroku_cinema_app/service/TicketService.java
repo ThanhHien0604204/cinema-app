@@ -162,7 +162,10 @@ public class TicketService {
             List<String> seats = b.getSeats();
             String showtimeId = b.getShowtimeId();
             if (seats != null && !seats.isEmpty() && showtimeId != null) {
-                long updated = updateSeatsToConfirmed(showtimeId, seats, b.getId());
+                long updated = updateSeatsToConfirmed(showtimeId, seats, b.getId(), b.getHoldId());
+                if (updated != (b.getSeats() != null ? b.getSeats().size() : 0)) {
+                    log.warn("Ledger confirm partial: updated={} expected={}", updated, (b.getSeats()!=null?b.getSeats().size():0));
+                }
                 log.info("Ledger updated {} seats to CONFIRMED for booking {}", updated, bookingId);
             } else {
                 log.warn("Missing showtimeId/seats when confirming booking {}", bookingId);
@@ -189,7 +192,8 @@ public class TicketService {
     /**
      * Update seats từ HOLD → CONFIRMED using MongoTemplate
      */
-    private long updateSeatsToConfirmed(String showtimeId, List<String> seats, String ticketId) {
+    private long updateSeatsToConfirmed(String showtimeId, List<String> seats, String ticketId, String holdId) {
+        if (showtimeId == null || seats == null || seats.isEmpty()) return 0;
         // Build query: find seats with status HOLD và refType LOCK
         Query query = new Query();
         query.addCriteria(Criteria.where("showtimeId").is(showtimeId));
@@ -198,11 +202,12 @@ public class TicketService {
         // THÊM: Check refType = LOCK (nếu SeatLedger có field này)
         // Nếu không có refType, bỏ dòng này
         query.addCriteria(Criteria.where("refType").is("LOCK"));
+        query.addCriteria(Criteria.where("refId").is(holdId)); // 🔑 ràng buộc đúng hold
 
         // Count seats cần update để validate
         long totalSeats = mongo.count(query, SeatLedger.class);
         if (totalSeats == 0) {
-            log.warn("No HOLD seats found to confirm for showtimeId={}, seats={}", showtimeId, seats);
+            log.warn("Không tìm thấy chỗ ngồi GIỮ để xác nhận showtimeId={}, seats={}", showtimeId, seats);
             return 0;
         }
 
@@ -215,7 +220,7 @@ public class TicketService {
 
         // FIX: Dùng updateMulti với đúng signature
         // updateMulti(Query query, Update update, Class<T> entityClass)
-        long updated = mongo.updateMulti(query, update, SeatLedger.class).getModifiedCount();
+        long updated = mongo.updateMulti(query, update, "seat_ledger").getModifiedCount();
 
         log.debug("Updated {} seats to CONFIRMED (expected: {}) for ticket={}", updated, totalSeats, ticketId);
         return updated;
@@ -319,9 +324,8 @@ public class TicketService {
 
             // Confirm ledger using MongoTemplate
             log.info("Confirming seats for showtime: " + hold.getShowtimeId() + ", seats: " + hold.getSeats() + ", bookingId: " + booking.getId());
-            long confirmed = freeConfirmedSeats(hold.getShowtimeId(), hold.getSeats(), booking.getId());
-            log.info("Confirmed seats count: " + confirmed + ", expected: " + hold.getSeats().size());
-            if (confirmed != hold.getSeats().size()) {
+            long updated = updateSeatsToConfirmed(hold.getShowtimeId(), hold.getSeats(), booking.getId(), holdId);
+            if (updated != hold.getSeats().size()) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "SEAT_CONFIRM_FAILED");
             }
 
@@ -429,7 +433,7 @@ public class TicketService {
             ticketRepo.save(b);
 
             // UPDATE SEATS
-            updateSeatsToConfirmed(b.getShowtimeId(), b.getSeats(), b.getId());
+            updateSeatsToConfirmed(b.getShowtimeId(), b.getSeats(), b.getId(), b.getHoldId());
 
             // DELETE HOLD
             if (b.getHoldId() != null) {
