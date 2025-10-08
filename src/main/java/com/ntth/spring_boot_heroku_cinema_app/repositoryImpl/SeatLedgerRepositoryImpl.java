@@ -122,21 +122,22 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
     /** Giữ nguyên API tiện dụng đã khai báo trong interface */
     @Override
     public long confirmMany(String showtimeId, List<String> seats, String bookingId, String holdId) {
-        Query q = new Query(new Criteria().andOperator(
-                Criteria.where("showtimeId").is(showtimeId),
-                Criteria.where("seat").in(seats),
-                Criteria.where("state").is("HOLD"),
-                Criteria.where("refType").is("LOCK"),
-                Criteria.where("refId").is(holdId)
-                // ❌ KHÔNG ràng buộc expiresAt > now ở đây
-        ));
+        if (seats == null || seats.isEmpty()) return 0;
+        // Chuyển từ HOLD -> CONFIRMED
+        Query q = new Query();
+        q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
+        q.addCriteria(Criteria.where("seatNumber").in(seats));
+        q.addCriteria(Criteria.where("status").is("HOLD"));
+        q.addCriteria(Criteria.where("refId").is(holdId));        // <— BẮT BUỘC
+        q.addCriteria(Criteria.where("refType").is("LOCK"));
+
         Update u = new Update()
                 .set("state", "CONFIRMED")
                 .set("refType", "BOOKING")
                 .set("refId", bookingId)
                 .unset("expiresAt");
-        var r = mongo.updateMulti(q, u, SeatLedger.class);
-        return r.getModifiedCount();
+
+        return mongo.updateMulti(q, u, SeatLedger.class).getModifiedCount();
     }
 
 

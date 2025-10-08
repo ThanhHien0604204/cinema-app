@@ -128,11 +128,11 @@ public class TicketService {
             log.info("Booking {} already confirmed", bookingId);
             return b;
         }
-        if (!"PENDING_PAYMENT".equalsIgnoreCase(b.getStatus())) {
-            // Cho phép confirm cả khi FAILED/CANCELED? -> tuỳ bạn.
-            // Mặc định chặn để tránh confirm nhầm:
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_STATUS: " + b.getStatus());
-        }
+//        if (!"PENDING_PAYMENT".equalsIgnoreCase(b.getStatus())) {
+//            // Cho phép confirm cả khi FAILED/CANCELED? -> tuỳ bạn.
+//            // Mặc định chặn để tránh confirm nhầm:
+//            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_STATUS: " + b.getStatus());
+//        }
 
         // 3) KHÔNG kiểm tra txId / IPN. Xác nhận NGAY.
         Ticket.PaymentInfo pay = b.getPayment();
@@ -161,30 +161,33 @@ public class TicketService {
         try {
             List<String> seats = b.getSeats();
             String showtimeId = b.getShowtimeId();
-            if (seats != null && !seats.isEmpty() && showtimeId != null) {
-                long updated = updateSeatsToConfirmed(showtimeId, seats, b.getId(), b.getHoldId());
-                if (updated != (b.getSeats() != null ? b.getSeats().size() : 0)) {
-                    log.warn("Ledger confirm partial: updated={} expected={}", updated, (b.getSeats()!=null?b.getSeats().size():0));
+            String holdId = b.getHoldId();
+            if (seats != null && !seats.isEmpty() && showtimeId != null && holdId != null && !holdId.isBlank()) {
+                try {
+                    long updated = ledgerRepo.confirmMany(showtimeId, seats, b.getId(), holdId);
+                    log.info("ledger.confirmMany updated={}, ticket={}", updated, b.getId());
+                } catch (Exception e) {
+                    log.warn("ledger.confirmMany failed for booking {}: {}", b.getId(), e.toString());
                 }
-                log.info("Ledger updated {} seats to CONFIRMED for booking {}", updated, bookingId);
+                // 3) Xoá hold sau khi confirm
+                try { lockRepo.deleteById(holdId); } catch (Exception ignore) {}
             } else {
                 log.warn("Missing showtimeId/seats when confirming booking {}", bookingId);
             }
         } catch (Exception e) {
             log.error("Seat update failed for booking {}: {}", bookingId, e.getMessage());
-            // không throw để tránh gãy flow
         }
 
-        // 6) DELETE SEAT_LOCK (nếu có)
-        try {
-            String holdId = b.getHoldId();
-            if (holdId != null && !holdId.isBlank()) {
-                lockRepo.deleteById(holdId);
-                log.info("Deleted hold {} for booking {}", holdId, bookingId);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to delete hold for booking {}: {}", bookingId, e.getMessage());
-        }
+//        // 6) DELETE SEAT_LOCK (nếu có)
+//        try {
+//            String holdId = b.getHoldId();
+//            if (holdId != null && !holdId.isBlank()) {
+//                lockRepo.deleteById(holdId);
+//                log.info("Deleted hold {} for booking {}", holdId, bookingId);
+//            }
+//        } catch (Exception e) {
+//            log.warn("Failed to delete hold for booking {}: {}", bookingId, e.getMessage());
+//        }
 
         return b;
     }
@@ -193,16 +196,15 @@ public class TicketService {
      * Update seats từ HOLD → CONFIRMED using MongoTemplate
      */
     private long updateSeatsToConfirmed(String showtimeId, List<String> seats, String ticketId, String holdId) {
-        if (showtimeId == null || seats == null || seats.isEmpty()) return 0;
+        if (showtimeId == null || showtimeId.isBlank() || seats == null || seats.isEmpty()) return 0L;
         // Build query: find seats with status HOLD và refType LOCK
         Query query = new Query();
         query.addCriteria(Criteria.where("showtimeId").is(showtimeId));
         query.addCriteria(Criteria.where("seatNumber").in(seats));
         query.addCriteria(Criteria.where("status").is("HOLD"));
-        // THÊM: Check refType = LOCK (nếu SeatLedger có field này)
-        // Nếu không có refType, bỏ dòng này
-        query.addCriteria(Criteria.where("refType").is("LOCK"));
+
         query.addCriteria(Criteria.where("refId").is(holdId)); // 🔑 ràng buộc đúng hold
+        query.addCriteria(Criteria.where("refType").is("LOCK"));
 
         // Count seats cần update để validate
         long totalSeats = mongo.count(query, SeatLedger.class);
@@ -222,7 +224,7 @@ public class TicketService {
         // updateMulti(Query query, Update update, Class<T> entityClass)
         long updated = mongo.updateMulti(query, update, "seat_ledger").getModifiedCount();
 
-        log.debug("Updated {} seats to CONFIRMED (expected: {}) for ticket={}", updated, totalSeats, ticketId);
+        log.debug("Updated {} seats to CONFIRMED (expected: {}) for ticket={}", updated, totalSeats, ticketId,holdId);
         return updated;
     }
 
