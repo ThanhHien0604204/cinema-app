@@ -17,9 +17,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
-import java.util.Base64;
-import java.util.Date;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class PasswordResetService {
@@ -35,17 +34,22 @@ public class PasswordResetService {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+    private static final Logger logger = LoggerFactory.getLogger(PasswordResetService.class);
 
     // Bước 1: Yêu cầu reset → Tạo & gửi OTP
     public void requestReset(ForgotPasswordRequest req) {
         String email = req.email().trim().toLowerCase();
 
+        logger.info("Request reset for email: {}", email);
         if (!userRepo.existsByEmail(email)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Email không tồn tại");
+            logger.warn("Email not found: {}", email);
+            throw new IllegalArgumentException("Email không tồn tại");
         }
-
         // Xóa OTP cũ nếu có
-        tokenRepo.findByEmailAndUsedFalse(email).ifPresent(tokenRepo::delete);
+        tokenRepo.findByEmailAndUsedFalse(email).ifPresent(token -> {
+            logger.info("Deleting old token for email: {}", email);
+            tokenRepo.delete(token);
+        });
 
         // Tạo OTP 6 số
         String otp = generateOtp();
@@ -54,9 +58,16 @@ public class PasswordResetService {
         // Lưu vào DB
         PasswordResetToken resetToken = new PasswordResetToken(email, otp, expiryDate);
         tokenRepo.save(resetToken);
+        logger.info("Saved OTP: {} for email: {}", otp, email);
 
         // Gửi email chứa OTP
-        emailService.sendOtpEmail(email, otp);
+        try {
+            emailService.sendOtpEmail(email, otp);
+            logger.info("OTP email sent to: {}", email);
+        } catch (Exception e) {
+            logger.error("Failed to send OTP email to {}: {}", email, e.getMessage(), e);
+            throw new RuntimeException("Lỗi gửi email: " + e.getMessage());
+        }
     }
 
     // Bước 2: Verify OTP & reset password
