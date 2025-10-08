@@ -30,10 +30,10 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
         Query q = new Query();
         q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
         q.addCriteria(Criteria.where("seat").in(seats));
-        q.addCriteria(Criteria.where("state").is(SeatState.FREE.name()));
+        q.addCriteria(Criteria.where("status").is(SeatState.FREE.name()));
 
         Update u = new Update()
-                .set("state", SeatState.HOLD.name())
+                .set("status", SeatState.HOLD.name())
                 .set("refType", "LOCK")
                 .set("refId", holdId)
                 .set("expiresAt", expiresAt);
@@ -48,13 +48,13 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
         Query q = new Query();
         q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
         q.addCriteria(Criteria.where("seat").in(seats));
-        q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
+        q.addCriteria(Criteria.where("status").is(SeatState.HOLD.name()));
         q.addCriteria(Criteria.where("refType").is("LOCK"));
         q.addCriteria(Criteria.where("refId").is(holdId));
         q.addCriteria(Criteria.where("expiresAt").gt(Instant.now()));
 
         Update u = new Update()
-                .set("state", SeatState.CONFIRMED.name())
+                .set("status", SeatState.CONFIRMED.name())
                 .set("refType", "BOOKING")
                 .set("refId", bookingId)
                 .unset("expiresAt");
@@ -69,12 +69,12 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
         Query q = new Query();
         q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
         q.addCriteria(Criteria.where("seat").in(seats));
-        q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
+        q.addCriteria(Criteria.where("status").is(SeatState.HOLD.name()));
         q.addCriteria(Criteria.where("refType").is("LOCK"));
         q.addCriteria(Criteria.where("refId").is(holdId));
 
         Update u = new Update()
-                .set("state", SeatState.FREE.name())
+                .set("status", SeatState.FREE.name())
                 .unset("refType")
                 .unset("refId")
                 .unset("expiresAt");
@@ -87,12 +87,12 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
     @Override
     public long releaseExpiredLocks(Instant now) {
         Query q = new Query();
-        q.addCriteria(Criteria.where("state").is(SeatState.HOLD.name()));
+        q.addCriteria(Criteria.where("status").is(SeatState.HOLD.name()));
         q.addCriteria(Criteria.where("refType").is("LOCK"));
         q.addCriteria(Criteria.where("expiresAt").lt(now));
 
         Update u = new Update()
-                .set("state", SeatState.FREE.name())
+                .set("status", SeatState.FREE.name())
                 .unset("refType")
                 .unset("refId")
                 .unset("expiresAt");
@@ -105,12 +105,12 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
     @Override
     public long releaseSeatsByBookingId(String bookingId) {
         Query q = new Query();
-        q.addCriteria(Criteria.where("state").is(SeatState.CONFIRMED.name()));
+        q.addCriteria(Criteria.where("status").is(SeatState.CONFIRMED.name()));
         q.addCriteria(Criteria.where("refType").is("BOOKING"));
         q.addCriteria(Criteria.where("refId").is(bookingId));
 
         Update u = new Update()
-                .set("state", SeatState.FREE.name())
+                .set("status", SeatState.FREE.name())
                 .unset("refType")
                 .unset("refId")
                 .unset("expiresAt");
@@ -147,12 +147,12 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
         Query q = new Query();
         q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
         q.addCriteria(Criteria.where("seat").in(seats));
-        q.addCriteria(Criteria.where("state").is(SeatState.CONFIRMED.name()));
+        q.addCriteria(Criteria.where("status").is(SeatState.CONFIRMED.name()));
         q.addCriteria(Criteria.where("refType").is("BOOKING"));
         q.addCriteria(Criteria.where("refId").is(bookingId));
 
         Update u = new Update()
-                .set("state", SeatState.FREE.name())
+                .set("status", SeatState.FREE.name())
                 .unset("refType")
                 .unset("refId")
                 .unset("expiresAt");
@@ -169,10 +169,10 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
             // Cho phép lấy ghế nếu đang FREE, hoặc chưa có doc,
             // hoặc đang HOLD nhưng đã hết hạn.
             Criteria canLock = new Criteria().orOperator(
-                    Criteria.where("state").is(SeatState.FREE),
-                    Criteria.where("state").exists(false),
+                    Criteria.where("status").is(SeatState.FREE),
+                    Criteria.where("status").exists(false),
                     new Criteria().andOperator(
-                            Criteria.where("state").is(SeatState.HOLD),
+                            Criteria.where("status").is(SeatState.HOLD),
                             new Criteria().orOperator(
                                     Criteria.where("expiresAt").lt(now),
                                     Criteria.where("expiresAt").is(null)
@@ -189,7 +189,7 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
             Update u = new Update()
                     .set("showtimeId", showtimeId)
                     .set("seat", seat)
-                    .set("state", SeatState.HOLD)
+                    .set("status", SeatState.HOLD)
                     .set("refType", "LOCK")
                     .set("refId", holdId)
                     .set("expiresAt", expiresAt);

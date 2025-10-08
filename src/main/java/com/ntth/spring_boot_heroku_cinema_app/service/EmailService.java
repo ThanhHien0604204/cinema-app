@@ -1,5 +1,9 @@
 package com.ntth.spring_boot_heroku_cinema_app.service;
 
+import jakarta.mail.MessagingException;
+import jakarta.mail.SendFailedException;
+import jakarta.mail.Transport;
+import jakarta.mail.internet.MimeMessage;
 import org.eclipse.angus.mail.util.MailConnectException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,9 +25,9 @@ public class EmailService {
     private JavaMailSender mailSender;
 
     @Retryable(
-            value = {MailConnectException.class},
+            value = {MessagingException.class},
             maxAttempts = 3,
-            backoff = @Backoff(delay = 1000) // Retry sau 1 giây nếu fail
+            backoff = @Backoff(delay = 2000) // Retry sau 2 giây
     )
     public void sendOtpEmail(String toEmail, String otp) {
         log.info("Attempting to send OTP email to: {} (Attempt)", toEmail);
@@ -32,12 +36,22 @@ public class EmailService {
         message.setTo(toEmail);
         message.setSubject("Mã OTP Đặt Lại Mật Khẩu - Movie Ticket Booking");
         message.setText(buildOtpEmailBody(otp));
+
         try {
-            mailSender.send(message);
+            MimeMessage mimeMessage = mailSender.createMimeMessage();
+            mimeMessage.setFrom("no-reply@movie-ticket-booking-app.com"); // Set from address
+            mimeMessage.setRecipients(MimeMessage.RecipientType.TO, toEmail);
+            mimeMessage.setSubject("Mã OTP Đặt Lại Mật Khẩu - Movie Ticket Booking");
+            mimeMessage.setText(buildOtpEmailBody(otp));
+
+            Transport.send(mimeMessage); // Gửi trực tiếp để debug
             log.info("OTP email sent successfully to: {}", toEmail);
-        } catch (Exception e) {
-            log.error("Failed to send OTP email to {}: {}", toEmail, e.getMessage(), e);
-            throw e; // Retryable sẽ xử lý retry
+        } catch (SendFailedException e) {
+            log.error("Send failed for {}: {}", toEmail, e.getMessage(), e);
+            throw new RuntimeException("Lỗi gửi email: " + e.getMessage());
+        } catch (MessagingException e) {
+            log.error("Messaging error for {}: {}", toEmail, e.getMessage(), e);
+            throw new RuntimeException("Lỗi kết nối mail server: " + e.getMessage());
         }
     }
     private String buildOtpEmailBody(String otp) {

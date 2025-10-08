@@ -3,6 +3,7 @@ package com.ntth.spring_boot_heroku_cinema_app.pojo;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.time.Instant;
 
@@ -12,7 +13,10 @@ public class SeatLedger {
     private String id;             // format: showtimeId + "#" + seat
     private String showtimeId;
     private String seat;
+
+    @Field("status")
     private SeatState status;       // FREE/HOLD/CONFIRMED
+
     private String refType;        // LOCK|BOOKING
     private String refId;          // holdId|bookingId
     @Indexed(expireAfterSeconds = 0)
