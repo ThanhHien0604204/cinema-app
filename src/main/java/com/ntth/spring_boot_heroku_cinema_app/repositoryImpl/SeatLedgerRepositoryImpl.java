@@ -132,7 +132,7 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
         q.addCriteria(Criteria.where("refType").is("LOCK"));
 
         Update u = new Update()
-                .set("state", "CONFIRMED")
+                .set("status", "CONFIRMED")
                 .set("refType", "BOOKING")
                 .set("refId", bookingId)
                 .unset("expiresAt");

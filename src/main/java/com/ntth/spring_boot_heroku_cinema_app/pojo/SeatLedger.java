@@ -12,7 +12,7 @@ public class SeatLedger {
     private String id;             // format: showtimeId + "#" + seat
     private String showtimeId;
     private String seat;
-    private SeatState state;       // FREE/HOLD/CONFIRMED
+    private SeatState status;       // FREE/HOLD/CONFIRMED
     private String refType;        // LOCK|BOOKING
     private String refId;          // holdId|bookingId
     @Indexed(expireAfterSeconds = 0)
@@ -42,14 +42,13 @@ public class SeatLedger {
         this.seat = seat;
     }
 
-    public SeatState getState() {
-        return state;
+    public SeatState getStatus() {
+        return status;
     }
 
-    public void setState(SeatState state) {
-        this.state = state;
+    public void setStatus(SeatState status) {
+        this.status = status;
     }
-
     public String getRefType() {
         return refType;
     }

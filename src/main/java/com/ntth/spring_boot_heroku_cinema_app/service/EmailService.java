@@ -1,5 +1,6 @@
 package com.ntth.spring_boot_heroku_cinema_app.service;
 
+import org.eclipse.angus.mail.util.MailConnectException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -7,6 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -17,12 +20,25 @@ public class EmailService {
     @Autowired
     private JavaMailSender mailSender;
 
+    @Retryable(
+            value = {MailConnectException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 1000) // Retry sau 1 giây nếu fail
+    )
     public void sendOtpEmail(String toEmail, String otp) {
+        log.info("Attempting to send OTP email to: {} (Attempt)", toEmail);
+
         SimpleMailMessage message = new SimpleMailMessage();
         message.setTo(toEmail);
         message.setSubject("Mã OTP Đặt Lại Mật Khẩu - Movie Ticket Booking");
         message.setText(buildOtpEmailBody(otp));
-        mailSender.send(message);
+        try {
+            mailSender.send(message);
+            log.info("OTP email sent successfully to: {}", toEmail);
+        } catch (Exception e) {
+            log.error("Failed to send OTP email to {}: {}", toEmail, e.getMessage(), e);
+            throw e; // Retryable sẽ xử lý retry
+        }
     }
     private String buildOtpEmailBody(String otp) {
         return """

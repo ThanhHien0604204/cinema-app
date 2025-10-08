@@ -201,10 +201,14 @@ public class TicketService {
         Query query = new Query();
         query.addCriteria(Criteria.where("showtimeId").is(showtimeId));
         query.addCriteria(Criteria.where("seatNumber").in(seats));
-        query.addCriteria(Criteria.where("status").is("HOLD"));
 
-        query.addCriteria(Criteria.where("refId").is(holdId)); // 🔑 ràng buộc đúng hold
-        query.addCriteria(Criteria.where("refType").is("LOCK"));
+        // ✅ Dùng "state" thay vì "status" (và idempotent: chấp nhận cả trạng thái đã CONFIRMED)
+        query.addCriteria(new Criteria().orOperator(
+                Criteria.where("status").is("HOLD").and("refType").is("LOCK").and("refId").is(holdId),
+                Criteria.where("status").is("HOLD").and("refType").is("LOCK"),            // phòng khi refId chưa set
+                Criteria.where("status").is("CONFIRMED").and("refType").is("BOOKING")      // idempotent
+                        .and("refId").is(ticketId)
+        ));
 
         // Count seats cần update để validate
         long totalSeats = mongo.count(query, SeatLedger.class);

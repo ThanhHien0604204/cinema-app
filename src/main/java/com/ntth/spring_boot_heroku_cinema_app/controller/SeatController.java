@@ -40,7 +40,7 @@ public class SeatController {
         // Map existing states (với check hết hạn HOLD)
         Map<String, SeatState> stateMap = new HashMap<>();
         for (SeatLedger r : rows) {
-            SeatState state = r.getState();
+            SeatState state = r.getStatus();
             if (state == SeatState.HOLD) {
                 Instant exp = r.getExpiresAt();
                 if (exp != null && exp.isBefore(now)) {
