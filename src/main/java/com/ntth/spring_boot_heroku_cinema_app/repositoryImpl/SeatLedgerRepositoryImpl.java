@@ -126,7 +126,7 @@ public class SeatLedgerRepositoryImpl implements SeatLedgerRepositoryCustom {
         // Chuyển từ HOLD -> CONFIRMED
         Query q = new Query();
         q.addCriteria(Criteria.where("showtimeId").is(showtimeId));
-        q.addCriteria(Criteria.where("seatNumber").in(seats));
+        q.addCriteria(Criteria.where("seat").in(seats));
         q.addCriteria(Criteria.where("status").is("HOLD"));
         q.addCriteria(Criteria.where("refId").is(holdId));        // <— BẮT BUỘC
         q.addCriteria(Criteria.where("refType").is("LOCK"));

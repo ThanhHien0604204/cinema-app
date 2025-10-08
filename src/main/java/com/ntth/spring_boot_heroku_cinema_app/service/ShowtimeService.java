@@ -3,6 +3,7 @@ package com.ntth.spring_boot_heroku_cinema_app.service;
 import com.ntth.spring_boot_heroku_cinema_app.dto.CreateShowtimeRequest;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ShowtimeMapper;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ShowtimeResponse;
+import com.ntth.spring_boot_heroku_cinema_app.dto.UpdateShowtimeRequest;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Movie;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Room;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.SeatLedger;
@@ -161,32 +162,44 @@ public class ShowtimeService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid time format. Use HH:mm (e.g., 14:00)");
         }
     }
-    public Showtime updateShowtime(String id, @Valid Showtime s) {
+    public Showtime updateShowtime(String id, UpdateShowtimeRequest dto) {
         var current = showtimeRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Showtime not found"));
-
-        // cập nhật field
-        current.setMovieId(s.getMovieId());
-        current.setRoomId(s.getRoomId());
-        current.setSessionName(s.getSessionName());
-        current.setStartAt(s.getStartAt());
-        current.setEndAt(s.getEndAt());
-        current.setPrice(s.getPrice());
-        current.setTotalSeats(s.getTotalSeats());
-        current.setAvailableSeats(s.getAvailableSeats());
-        current.setDate(s.getDate());
-
-        // tính endAt nếu cần
-        if (current.getEndAt() == null) {
-            var movie = movieRepository.findById(current.getMovieId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movie not found"));
-            current.setEndAt(current.getStartAt().plus(movie.getDurationMinutes(), java.time.temporal.ChronoUnit.MINUTES));
+        // Parse thời gian
+        LocalTime startTime = parseTime(dto.startTime());
+        LocalTime endTime = parseTime(dto.endTime());
+        // Parse date string to LocalDate
+        LocalDate date;
+        try {
+            date = LocalDate.parse(dto.date()); // expected format: "yyyy-MM-dd"
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid date format. Use yyyy-MM-dd (e.g., 2025-10-08)");
         }
+        Instant startAt = ZonedDateTime.of(date, startTime, VN).toInstant();
+        Instant endAt = ZonedDateTime.of(date, endTime, VN).toInstant();
+
+        // Kiểm tra thời gian hiện tại (tùy chọn, nếu muốn cấm quá khứ)
+        Instant now = Instant.now().atZone(VN).toInstant();
+        if (startAt.isBefore(now)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startAt must be in the future");
+        }
+        // Cập nhật
+        current.setMovieId(dto.movieId());
+        current.setRoomId(dto.roomId());
+        current.setSessionName(dto.sessionName());
+        current.setStartAt(startAt);
+        current.setEndAt(endAt);
+        current.setPrice(dto.price());
+        current.setTotalSeats(dto.totalSeats());
+        current.setAvailableSeats(dto.availableSeats());
+        current.setDate(date);
+
+        // Kiểm tra endAt
         if (!current.getEndAt().isAfter(current.getStartAt())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "endAt must be after startAt");
         }
 
-        // kiểm tra overlap, NHƯNG loại trừ chính showtime đang update
+        // Kiểm tra overlap
         boolean overlap = mongo.exists(
                 new Query(new Criteria().andOperator(
                         Criteria.where("roomId").is(current.getRoomId()),

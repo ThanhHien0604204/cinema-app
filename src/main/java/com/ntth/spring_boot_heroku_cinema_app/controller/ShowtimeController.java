@@ -2,6 +2,7 @@ package com.ntth.spring_boot_heroku_cinema_app.controller;
 
 import com.ntth.spring_boot_heroku_cinema_app.dto.CreateShowtimeRequest;
 import com.ntth.spring_boot_heroku_cinema_app.dto.ShowtimeResponse;
+import com.ntth.spring_boot_heroku_cinema_app.dto.UpdateShowtimeRequest;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Movie;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Showtime;
 import com.ntth.spring_boot_heroku_cinema_app.repository.MovieRepository;
@@ -121,8 +122,8 @@ public class ShowtimeController {
     }
 
     @PutMapping("/{id}")
-    public Showtime update(@PathVariable String id, @RequestBody @Valid Showtime s) {
-        return showtimeService.updateShowtime(id, s);
+    public Showtime update(@PathVariable String id, @RequestBody @Valid UpdateShowtimeRequest dto) {
+        return showtimeService.updateShowtime(id, dto);
     }
     @DeleteMapping("/{id}")
     public void delete(@PathVariable String id) {

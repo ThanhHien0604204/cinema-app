@@ -1,7 +1,9 @@
 package com.ntth.spring_boot_heroku_cinema_app.service;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.mail.MessagingException;
 import jakarta.mail.SendFailedException;
+import jakarta.mail.Session;
 import jakarta.mail.Transport;
 import jakarta.mail.internet.MimeMessage;
 import org.eclipse.angus.mail.util.MailConnectException;
@@ -23,6 +25,12 @@ public class EmailService {
 
     @Autowired
     private JavaMailSender mailSender;
+
+    @PostConstruct
+    public void init() {
+        Session session = mailSender.createMimeMessage().getSession();
+        log.info("Mail Session Properties: {}", session.getProperties());
+    }
 
     @Retryable(
             value = {MessagingException.class},

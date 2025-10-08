@@ -200,7 +200,7 @@ public class TicketService {
         // Build query: find seats with status HOLD và refType LOCK
         Query query = new Query();
         query.addCriteria(Criteria.where("showtimeId").is(showtimeId));
-        query.addCriteria(Criteria.where("seatNumber").in(seats));
+        query.addCriteria(Criteria.where("seat").in(seats));
 
         // ✅ Dùng "state" thay vì "status" (và idempotent: chấp nhận cả trạng thái đã CONFIRMED)
         query.addCriteria(new Criteria().orOperator(
