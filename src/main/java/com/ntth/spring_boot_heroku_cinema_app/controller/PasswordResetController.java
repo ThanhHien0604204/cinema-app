@@ -21,6 +21,10 @@ public class PasswordResetController {
     @Autowired
     private PasswordResetService service;
 
+    public PasswordResetController(PasswordResetService service) {
+        this.service = service;
+    }
+
     // Endpoint yêu cầu reset (gửi OTP)
     @PostMapping("/forgot-password")
     public ResponseEntity<String> forgotPassword(@RequestBody ForgotPasswordRequest request) {

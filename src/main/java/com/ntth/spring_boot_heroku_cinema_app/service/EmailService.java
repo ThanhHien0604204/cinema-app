@@ -5,6 +5,7 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.SendFailedException;
 import jakarta.mail.Session;
 import jakarta.mail.Transport;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import org.eclipse.angus.mail.util.MailConnectException;
 import org.slf4j.Logger;
@@ -14,60 +15,54 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 
 @Service
 public class EmailService {
-    private static final Logger logger = LoggerFactory.getLogger(EmailService.class);
+    private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
-    @Autowired
-    private JavaMailSender mailSender;
+    private final JavaMailSender mailSender;
 
-    @PostConstruct
-    public void init() {
-        // Kiểm tra env vars
-        String username = System.getenv("SPRING_MAIL_USERNAME");
-        String password = System.getenv("SPRING_MAIL_PASSWORD");
-        logger.info("Env Vars - Username: {}, Password: {}", username, password);
+    @Value("${app.mail.from}")
+    private String fromEmail;
+    @Value("${app.mail.fromName:Movie App}")
+    private String fromName;
 
-        // Kiểm tra session properties từ mailSender
-        Session session = mailSender.createMimeMessage().getSession();
-        logger.info("Mail Session Properties: {}", session.getProperties());
+    public EmailService(JavaMailSender mailSender) {
+        this.mailSender = mailSender;
     }
 
-    @Retryable(
-            value = {MessagingException.class},
-            maxAttempts = 3,
-            backoff = @Backoff(delay = 2000)
-    )
     public void sendOtpEmail(String toEmail, String otp) {
-        logger.info("Attempting to send OTP to: {} (Attempt)", toEmail);
-
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setTo(toEmail);
-        message.setSubject("Test OTP Email");
-        message.setText("This is a test OTP: " + otp + " to verify mail config.");
-
         try {
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
-            mimeMessage.setFrom("no-reply@movie-ticket-app.com");
-            mimeMessage.setRecipients(MimeMessage.RecipientType.TO, toEmail);
-            mimeMessage.setSubject("Test OTP Email");
-            mimeMessage.setText("This is a test OTP: " + otp + " to verify mail config.");
+            MimeMessage mime = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, "UTF-8");
+            helper.setFrom(new InternetAddress(fromEmail, fromName));
+            helper.setTo(toEmail);
+            helper.setSubject("Mã OTP đặt lại mật khẩu");
 
-            Transport.send(mimeMessage);
-            logger.info("Test OTP sent successfully to: {}", toEmail);
-        } catch (SendFailedException e) {
-            logger.error("Send failed for {}: {}", toEmail, e.getMessage(), e);
-            throw new RuntimeException("Lỗi gửi email: " + e.getMessage());
-        } catch (MessagingException e) {
-            logger.error("Messaging error for {}: {}", toEmail, e.getMessage(), e);
-            throw new RuntimeException("Lỗi kết nối mail server: " + e.getMessage());
+            String html = """
+                <p>Xin chào,</p>
+                <p>Mã OTP đặt lại mật khẩu của bạn là: <b style="font-size:16px">%s</b></p>
+                <p>OTP có hiệu lực trong %d phút.</p>
+                <p>Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>
+            """.formatted(otp, getTtlMinutesSafe());
+
+            helper.setText(html, true);
+            mailSender.send(mime);
+        } catch (Exception e) {
+            throw new RuntimeException("Gửi email thất bại: " + e.getMessage(), e);
         }
     }
+
+    private int getTtlMinutesSafe() {
+        // Có thể inject từ @Value nếu muốn đồng bộ với service
+        return 10;
+    }
 }
+
 //    /**
 //     * Gửi email reset password với link xác nhận (HTML)
 //     */
