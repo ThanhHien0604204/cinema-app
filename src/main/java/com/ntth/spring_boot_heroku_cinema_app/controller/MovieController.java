@@ -6,7 +6,10 @@ import java.util.List;
 import com.ntth.spring_boot_heroku_cinema_app.dto.MovieRequest;
 import com.ntth.spring_boot_heroku_cinema_app.pojo.Movie;
 import com.ntth.spring_boot_heroku_cinema_app.repository.MovieRepository;
+import com.ntth.spring_boot_heroku_cinema_app.service.EmailService;
 import com.ntth.spring_boot_heroku_cinema_app.service.MovieService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -23,7 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/movies")
 public class MovieController {
-
+    private static final Logger log = LoggerFactory.getLogger(MovieController.class);
     @Autowired
     private MovieService movieService;
     @Autowired // Tiêm repository để truy vấn dữ liệu từ cơ sở dữ liệu
@@ -86,10 +89,16 @@ public class MovieController {
     @PutMapping("/{id}")
     public ResponseEntity<Movie> update(@PathVariable String id, @Valid @RequestBody MovieRequest req) {
         try {
+            log.debug("Updating movie with ID: {}", id);
             Movie updatedMovie = movieService.update(id, req);
+            log.info("Successfully updated movie with ID: {}", id);
             return ResponseEntity.ok(updatedMovie);
         } catch (RuntimeException e) {
+            log.error("Failed to update movie with ID: {}. Error: {}", id, e.getMessage());
             return ResponseEntity.notFound().build();
+        } catch (Exception e) {
+            log.error("Unexpected error while updating movie with ID: {}", id, e);
+            return ResponseEntity.status(500).build();
         }
     }
 
