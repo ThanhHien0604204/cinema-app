@@ -134,17 +134,20 @@ public class SpringSecurityConfigs {
                         .requestMatchers(HttpMethod.POST,
                                 "/api/movies",
                                 "/api/showtimes",
-                                "/api/rooms"
+                                "/api/rooms",
+                                "/api/user/admin"
                         ).hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT,
                                 "/api/movies/{id}",
                                 "/api/showtimes/{id}",
-                                "/api/rooms/{id}"
+                                "/api/rooms/{id}",
+                                "/api/user/admin/{id}"
                         ).hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE,
                                 "/api/movies/{id}",
                                 "/api/showtimes/{id}",
-                                "/api/rooms/{id}"
+                                "/api/rooms/{id}",
+                                "/api/user/admin/{id}"
                         ).hasRole("ADMIN")
 
                         // Default: cho qua các request khác (có thể siết chặt hơn trong production)
