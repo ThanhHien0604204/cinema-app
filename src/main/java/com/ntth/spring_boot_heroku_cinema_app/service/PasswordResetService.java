@@ -119,6 +119,7 @@ public class PasswordResetService {
         return String.valueOf(n);
     }
 }
+
 //    private String generateOtp() {
 //        SecureRandom random = new SecureRandom();
 //        int otpNumber = 100000 + random.nextInt(900000);  // 100000 to 999999
