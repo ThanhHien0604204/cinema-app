@@ -24,28 +24,40 @@ import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+
 @Service
 public class EmailService {
-    private final WebClient client;
+
+    private final String apiKey;
     private final String fromEmail;
     private final String fromName;
+    private final HttpClient http = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(15)).build();
 
     public EmailService(
-            @Value("${spring.mail.username}") String apiKey,
-            @Value("${app.mail.from}") String fromEmail,
-            @Value("${app.mail.fromName:Movie App}") String fromName,
-            WebClient.Builder builder
+            @Value("${app.sendgrid.api-key:}") String apiKey,
+            @Value("${app.mail.from:}") String fromEmail,
+            @Value("${app.mail.fromName:Movie App}") String fromName
     ) {
+        this.apiKey = (apiKey != null && !apiKey.isBlank()) ? apiKey : null;
         this.fromEmail = fromEmail;
         this.fromName = fromName;
-        this.client = builder
-                .baseUrl("https://api.sendgrid.com/v3")
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .build();
+
+        if (this.apiKey == null) {
+            LoggerFactory.getLogger(getClass())
+                    .warn("SENDGRID API KEY is missing -> EmailService disabled (forgot-password sẽ không gửi mail).");
+        }
     }
 
     public void sendOtpEmail(String toEmail, String otp) {
+        if (apiKey == null) {
+            throw new IllegalStateException("Email is disabled: missing SENDGRID_API_KEY");
+        }
         String html = """
             <p>Xin chào,</p>
             <p>Mã OTP đặt lại mật khẩu của bạn là: <b>%s</b></p>
@@ -53,28 +65,41 @@ public class EmailService {
         """.formatted(otp);
 
         // JSON đúng schema SendGrid
-        String payload = """
+        String json = """
         {
           "personalizations": [ { "to": [ { "email": "%s" } ] } ],
           "from": { "email": "%s", "name": "%s" },
           "subject": "Mã OTP đặt lại mật khẩu",
           "content": [ { "type": "text/html", "value": %s } ]
         }
-        """.formatted(toEmail, fromEmail, fromName, toJsonString(html));
+        """.formatted(toEmail, fromEmail, fromName, toJson(html));
 
-        client.post()
-                .uri("/mail/send")
-                .bodyValue(payload)
-                .retrieve()
-                .onStatus(HttpStatusCode::isError, resp -> resp.bodyToMono(String.class)
-                        .map(body -> new RuntimeException("SendGrid API error " + resp.statusCode() + ": " + body)))
-                .toBodilessEntity()
-                .block(); // hoặc subscribe async theo nhu cầu
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.sendgrid.com/v3/mail/send"))
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(30))
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+        try {
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            int code = res.statusCode();
+            if (code >= 400) {
+                // Log chi tiết để debug, nhưng đừng trả về nội dung này cho client
+                throw new RuntimeException("SendGrid error " + code + ": " + res.body());
+            }
+        } catch (Exception e) {
+            // quăng để service upper layer xử (hoặc bạn có thể chỉ log và trả 200 tuỳ chính sách)
+            throw new RuntimeException("Gửi email thất bại: " + e.getMessage(), e);
+        }
     }
 
-    // escape chuỗi JSON đơn giản
-    private static String toJsonString(String s) {
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"";
+    private static String toJson(String s) {
+        return "\"" + s
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n") + "\"";
     }
 }
 

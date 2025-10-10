@@ -78,7 +78,9 @@ public class PasswordResetService {
             log.error("Failed to send OTP email to {}: {}", email, e.getMessage(), e);
             // xoá token vừa tạo để tránh rác
             tokenRepo.delete(token);
-            throw new RuntimeException("Lỗi gửi email. Vui lòng thử lại sau.");
+            // Trả về 200/202 để tránh lộ thông tin & tránh error UI
+            // hoặc nếu bạn muốn báo lỗi rõ ràng:
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Không thể gửi email lúc này, vui lòng thử lại sau");
         }
     }
 

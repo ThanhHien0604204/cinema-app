@@ -17,7 +17,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class PasswordResetController {
-
+    private static final Logger log = LoggerFactory.getLogger(PasswordResetController.class);
     @Autowired
     private PasswordResetService service;
 
@@ -27,9 +27,16 @@ public class PasswordResetController {
 
     // Endpoint yêu cầu reset (gửi OTP)
     @PostMapping("/forgot-password")
-    public ResponseEntity<String> forgotPassword(@RequestBody ForgotPasswordRequest request) {
-        service.requestReset(request);
-        return ResponseEntity.ok("OTP đã được gửi đến email của bạn nếu tồn tại. Kiểm tra hòm thư.");
+    public ResponseEntity<Void> forgot(@Valid @RequestBody ForgotPasswordRequest req) {
+        try {
+            service.requestReset(req);
+            return ResponseEntity.ok().build();
+        } catch (ResponseStatusException e) {
+            throw e; // giữ nguyên status đã map
+        } catch (Exception e) {
+            log.error("Forgot-password fail: {}", e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Tạm thời không gửi được email");
+        }
     }
 
     // Endpoint verify OTP & reset password
