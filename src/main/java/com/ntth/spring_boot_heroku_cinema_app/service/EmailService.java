@@ -38,6 +38,7 @@ public class EmailService {
     private final String fromName;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15)).build();
+    private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
     public EmailService(
             @Value("${app.sendgrid.api-key:}") String apiKey,
@@ -85,8 +86,10 @@ public class EmailService {
         try {
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             int code = res.statusCode();
+            String msgId = res.headers().firstValue("X-Message-Id").orElse("-");
+            log.info("SendGrid response: code={}, X-Message-Id={}", code, msgId);
             if (code >= 400) {
-                // Log chi tiết để debug, nhưng đừng trả về nội dung này cho client
+                log.error("SendGrid error body: {}", res.body());
                 throw new RuntimeException("SendGrid error " + code + ": " + res.body());
             }
         } catch (Exception e) {
