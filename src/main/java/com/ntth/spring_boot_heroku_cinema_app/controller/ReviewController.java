@@ -9,6 +9,8 @@ import com.ntth.spring_boot_heroku_cinema_app.repository.ReviewRepository;
 import com.ntth.spring_boot_heroku_cinema_app.repositoryImpl.CustomUserDetails;
 import com.ntth.spring_boot_heroku_cinema_app.service.ReviewService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -73,10 +75,31 @@ public class ReviewController {
     @GetMapping("/movie/{movieId}/me")
     public ResponseEntity<ReviewResponse> myReview(@PathVariable String movieId,
                                                    @AuthenticationPrincipal CustomUserDetails me) {
-        String userId = me.getUser().getId();                 // <--- lấy từ JWT
-        return reviewRepo.findByMovieIdAndUserId(movieId, userId)
-                .map(ReviewResponse::of).map(ResponseEntity::ok)
-                .orElse(ResponseEntity.noContent().build());
+        Logger logger = LoggerFactory.getLogger(getClass());
+
+        try {
+            if (me == null) {
+                logger.error("No authenticated user found");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            }
+
+            String userId = me.getUser().getId();
+            logger.debug("User ID: {}, Movie ID: {}", userId, movieId);
+
+            return reviewRepo.findByMovieIdAndUserId(movieId, userId)
+                    .map(review -> {
+                        logger.debug("Found review: {}", review);
+                        return ReviewResponse.of(review);
+                    })
+                    .map(ResponseEntity::ok)
+                    .orElseGet(() -> {
+                        logger.debug("No review found for user {} and movie {}", userId, movieId);
+                        return ResponseEntity.noContent().build();
+                    });
+        } catch (Exception e) {
+            logger.error("Error in myReview endpoint: ", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 
     // Xoá review của CHÍNH TÔI
