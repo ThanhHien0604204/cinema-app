@@ -72,9 +72,8 @@ public class ReviewController {
     }
 
     // Lấy review của CHÍNH TÔI cho 1 movie
-    @GetMapping("/movie/{movieId}/me")
     public ResponseEntity<ReviewResponse> myReview(@PathVariable String movieId,
-                                                   @AuthenticationPrincipal CustomUserDetails me) {
+                                                   @AuthenticationPrincipal JwtUser me) {
         Logger logger = LoggerFactory.getLogger(getClass());
 
         try {
@@ -83,7 +82,7 @@ public class ReviewController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
             }
 
-            String userId = me.getUser().getId();
+            String userId = me.getUserId(); // Sử dụng getUserId() từ JwtUser
             logger.debug("User ID: {}, Movie ID: {}", userId, movieId);
 
             return reviewRepo.findByMovieIdAndUserId(movieId, userId)
