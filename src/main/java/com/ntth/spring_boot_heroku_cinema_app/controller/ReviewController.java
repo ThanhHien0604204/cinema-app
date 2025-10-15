@@ -70,7 +70,7 @@ public class ReviewController {
                 req.content()
         );
     }
-
+    @GetMapping("/movie/{movieId}/me")
     // Lấy review của CHÍNH TÔI cho 1 movie
     public ResponseEntity<ReviewResponse> myReview(@PathVariable String movieId,
                                                    @AuthenticationPrincipal JwtUser me) {
