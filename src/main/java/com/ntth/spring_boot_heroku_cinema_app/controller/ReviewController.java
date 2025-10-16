@@ -104,8 +104,8 @@ public class ReviewController {
     // Xoá review của CHÍNH TÔI
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id,
-                                       @AuthenticationPrincipal CustomUserDetails me) {
-        String userId = me.getUser().getId();                 // <--- lấy từ JWT
+                                       @AuthenticationPrincipal JwtUser me) {
+        String userId = me.getUserId(); // Sử dụng getUserId() từ JwtUser               // <--- lấy từ JWT
         reviewService.delete(id, userId);
         return ResponseEntity.noContent().build();
     }
